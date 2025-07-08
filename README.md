@@ -17,7 +17,7 @@ MeteoGate APIs are built around the Attribute Convention for Data Discover (ACDD
 
   - Task 3: Explore the relationships and cardinalities and propose full WMD representations (WMDR2.0-JSON) based on the building blocks WMDR2.0-station, WMDR2.0-obs, WMDR2.0-inst
 
-- WP2: Implement a full transformation for WMDR1.0 to ACDD1.3-compliant JSON (lead: ?, collaborators: ?)
+- WP2: Implement a full transformation for WMDR1.0 (by way of WMDR2.0) to ACDD1.3-compliant JSON (lead: ?, collaborators: ?)
   - The PoC should test the concept for
     - a record of in situ temperature (a state variable, geometry: point) and ozone profile (composition, geometry: vertical profile) at a land station.
     - similarly for a mobile platform, e.g. ARGO float.
