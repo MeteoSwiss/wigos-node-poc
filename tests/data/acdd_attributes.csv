@@ -1,0 +1,7 @@
+category,name,default,description
+highly_recommended,title,,Short title
+highly_recommended,Conventions,ACDD-1.3,Convention identifier
+highly_recommended_variable,standard_name,,CF variable name
+recommended,summary,,Brief summary
+recommended,keywords,,List of keywords
+suggested,creator_email,,Email of the creator
