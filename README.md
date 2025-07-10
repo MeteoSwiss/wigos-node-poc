@@ -49,7 +49,8 @@ MeteoGate APIs are built around the Attribute Convention for Data Discover (ACDD
   - Based on the current OSCAR/Surface search facility, explore the existing possibilities on MeteoGate / Data Explorer (Open GeoWeb?) and document the gaps
   - Propose a framework for the front-end
   - Propose framework for the geospatial stuff, including front-end mapping
-  - Propose the API for DAR
+  - Propose the API for DAR, specifically the potential and limitations of OGC EDR API
+  - Contact management and interaction with WMO contacts database
   - Propose link to WIS2.0 metadata harvesting for OSCAR/Surface and vice-versa
 
 - WP7: MVP at threshold/breakthrough/goal levels (lead: WMO/Michel Jean, collaborators: WMO Secretariat)
