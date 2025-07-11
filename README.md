@@ -30,6 +30,9 @@ MeteoGate APIs are built around the Attribute Convention for Data Discover (ACDD
       
   - Task 3: Transformation of WMDR2.0-station, WMDR2.0-obs, WMDR2.0-inst objects into ACDD1.3 objects
     - Write a Python class to convert WMDR2.0-station, WMDR2.0-obs, WMDR2.0-inst to ACDD1.3 objects and vice-versa, and expose these objects.
+   
+  - Task 4: Migration of existing information from OSCAR/Surface to the OASIS platform
+    - Test how information from OSCAR/Surface can be migrated via XML export and then ingest into the new structure.
         
 - WP3: Use the MeteoGate Ingest API to register and persist a WMDR2.0-JSON record as linked ACDD1.3 records (lead: Vegar, collaborators: ?)
   - Task 1: Implement the chain of transformations from WMDR1.0 to WMDR2.0-JSON and disaggregation into linked ACDD1.3 records on MeteoGate and persist information in DB
@@ -45,7 +48,11 @@ MeteoGate APIs are built around the Attribute Convention for Data Discover (ACDD
     - adding missing or correcting information, i.e. to retrieve an ACDD1.3 record, to add an element, and to persist it again as an updated record
     - adding or correcting history of an element, e.g., document a change of station location at a given point in time, correct erroneous coordinates of a station at a given point in time
    
-- WP6: DAR and analytics, mapping, reporting (lead: Lucia, collaborators:)
+- WP6: Role management (lead: Lucia, collaborators: Vegar, WMO Secretariat)
+  - Task 1: Establish necessary levels of authorization
+  - Task 2: Identify gaps in OASIS and describe necessary steps, including effort
+    
+- WP7: DAR and analytics, mapping, reporting (lead: Lucia, collaborators:)
   - Based on the current OSCAR/Surface search facility, explore the existing possibilities on MeteoGate / Data Explorer (Open GeoWeb?) and document the gaps
   - Propose a framework for the front-end
   - Propose framework for the geospatial stuff, including front-end mapping
@@ -53,10 +60,10 @@ MeteoGate APIs are built around the Attribute Convention for Data Discover (ACDD
   - Contact management and interaction with WMO contacts database
   - Propose link to WIS2.0 metadata harvesting for OSCAR/Surface and vice-versa
 
-- WP7: MVP at threshold/breakthrough/goal levels (lead: WMO/Michel Jean, collaborators: WMO Secretariat)
+- WP8: MVP at threshold/breakthrough/goal levels (lead: WMO/Michel Jean, collaborators: WMO Secretariat)
   - Describe requirements at threshold/breakthrough/goal levels (WMO Secretariat)
   
-- WP8: Documentation/Proposal for STAC EUMETNET (lead: Andrea, collaborators:)
+- WP9: Documentation/Proposal for STAC EUMETNET (lead: Andrea, collaborators:)
   - Propose final architecture and production technology stack (Vegar, MeteoSwiss/ITA)
   - Provide cost estimates for MVP including RFI within FEMDI consortium or external proviers (Vegar, MeteoSwiss/ITA)
   - First draft of OSCAR nextGen proposal including cost estimate for Joint-STAC/PFAC 28 (submission: 15 Sep 2025)
@@ -83,5 +90,4 @@ Anna|--|--|1|1|2|--|1|2|2
 Timo|--|--|--|--|--|--|--|--|--
 Jeremy|<1|<1|<1|<1|<1|<1|<1|<1
 Andrea|--|--|--|--|--|--|--|--
-
 
