@@ -76,7 +76,7 @@ Enter the number of working days (or '--') you are likely to be able to invest i
 name|07Jul-11Jul|14Jul-18Jul|21Jul-25Jul|28Jul-01Aug|04Aug-08Aug|11Aug-15Aug|18Aug-22Aug|25Aug-29Aug|01Sep-05Sep
 --|--|--|--|--|--|--|--|--|--
 Jörg|3|--|--|3|2|3|3|3|2
-Lucia|--|--|--|--|--|--|--|--|--
+Lucia|--|--|3|3|3|3|2|3|3
 Vegar|--|--|--|--|--|--|--|--|--
 Anna|--|--|1|1|2|--|1|2|2
 Timo|--|--|--|--|--|--|--|--|--
