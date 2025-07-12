@@ -93,8 +93,6 @@ def test_from_json_roundtrip():
     acdd = ACDD.from_json(json_str)
     assert acdd.attributes == original
 
-
-
 def test_from_geojson_roundtrip():
     feature = {
         "type": "Feature",

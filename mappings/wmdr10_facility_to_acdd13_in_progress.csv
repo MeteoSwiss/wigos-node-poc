@@ -1,0 +1,41 @@
+﻿acdd_attribute,default,wmdr10_path,wmdr10_type,wmdr10_cardinality,notes
+id,,WIGOSMetadataRecord/facility/ObservingFacility/identifier/#text,string,1,WIGOS Station Identifier WSI
+title,,WIGOSMetadataRecord/facility/ObservingFacility/name,string,1..1,
+summary,,>description,string,0..1,
+geospatial_lat_min,,WIGOSMetadataRecord/facility/ObservingFacility/geospatialLocation/GeospatialLocation/geoLocation/Point/pos,decimal,1..1,first value in gml:pos
+geospatial_lat_max,,WIGOSMetadataRecord/facility/ObservingFacility/geospatialLocation/GeospatialLocation/geoLocation/Point/pos,decimal,1..1,second value in gml:pos
+geospatial_lon_min,,WIGOSMetadataRecord/facility/ObservingFacility/geospatialLocation/GeospatialLocation/geoLocation/Point/pos,decimal,1,first value in gml:pos
+geospatial_lon_max,,WIGOSMetadataRecord/facility/ObservingFacility/geospatialLocation/GeospatialLocation/geoLocation/Point/pos,decimal,1,second value in gml:pos
+geospatial_vertical_min,,WIGOSMetadataRecord/facility/ObservingFacility/geospatialLocation/GeospatialLocation/geoLocation/Point/pos,decimal,1,third value in gml:pos
+geospatial_vertical_max,,WIGOSMetadataRecord/facility/ObservingFacility/geospatialLocation/GeospatialLocation/geoLocation/Point/pos,decimal,1,third value in gml:pos
+geospatial_vertical_positive,,WIGOSMetadataRecord/facility/ObservingFacility/geospatialLocation/GeospatialLocation/geoLocation/Point/pos,decimal,1,"sign of elevation: 'up' for positive, 'down' for negative"
+geospatial_bounds_crs,WGS84,>geoLocation/crs,string,1,A 2D CRS. Should default to WGS84
+geospatial_bounds_vertical_crs,EPSG:5829,>geoLocation/crs,string,1,A vertical CRS. Should default to EPSG:5829 (instantaneous height above sea level
+geographic_region,,WIGOSMetadataRecord/facility/ObservingFacility/wmoRegion/href,code,0..1,value from codes.wmo.int/wmdr
+comments,,WIGOSMetadataRecord/facility/ObservingFacility/territory/Territory/territoryName/href,code,0..1,to be encoded as JSON and must use notation: value from codes.wmo.int/wmdr
+institution,,WIGOSMetadataRecord/facility/ObservingFacility/responsibleParty/ResponsibleParty/responsibleParty/CI_ResponsibleParty/organisationName/CharacterString,CI_ResponsibleParty,0..1,
+creator_name,,WIGOSMetadataRecord/facility/ObservingFacility/responsibleParty/ResponsibleParty/responsibleParty/CI_ResponsibleParty/individualName/CharacterString,CI_ResponsibleParty,0..1,
+creator_email,,WIGOSMetadataRecord/facility/ObservingFacility/responsibleParty/ResponsibleParty/responsibleParty/CI_ResponsibleParty/contactInfo/CI_Contact/address/CI_Address/electronicMailAddress/CharacterString,CI_ResponsibleParty,0..1,
+creator_phone,,WIGOSMetadataRecord/facility/ObservingFacility/responsibleParty/ResponsibleParty/responsibleParty/CI_ResponsibleParty/contactInfo/CI_Contact/phone/CI_Telephone/voice/CharacterString,CI_ResponsibleParty,0..1,
+keywords,,WIGOSMetadataRecord/facility/ObservingFacility/observation/ObservingCapability/observation/OM_Observation/observedProperty/href,ObservingCapability,0..*,list of notations (from codes.wmo.int) of observed variables 
+creator_url,,>onlineResource,CI_OnlineResource,0..*,
+time_coverage_start,,WIGOSMetadataRecord/facility/ObservingFacility/dateEstablished,Date,0..1,
+time_coverage_end,,WIGOSMetadataRecord/facility/ObservingFacility/dateClosed,Date,0..1,
+project,,WIGOSMetadataRecord/facility/ObservingFacility/programAffiliation/ProgramAffiliation/programAffiliation/href,ProgramAffiliation,1..*,"to be encoded as JSON: {""programAffiliation"": value from codes.wmo.int/wmdr, ""reportingStatus"": value from codes.wmo.int/wmdr, ""programSpecificFacilityID"": string}"
+history,,WIGOSMetadataRecord/facility/ObservingFacility/climateZone/ClimateZone/climateZone/href,ClimateZone,0..*,"to be encoded as JSON: {""validPeriod"": {encoding as TM_Period}, ""climateZone"": value from codes.wmo.int/wmdr}"
+history,,WIGOSMetadataRecord/facility/ObservingFacility/surfaceCover/SurfaceCover/surfaceCover/href,SurfaceCover,0..*,"to be encoded as JSON: {""validPeriod"": {encoding as TM_Period}, ""surfaceCover"": value from codes.wmo.int/wmdr, ""surfaceCoverClassification"": value from codes.wmo.int/wmdr}"
+comments,,WIGOSMetadataRecord/facility/ObservingFacility/surfaceRoughness/SurfaceRoughness/surfaceRoughness/href,SurfaceRoughness,0..*,"to be encoded as JSON: {""validPeriod"": {encoding as TM_Period}, ""surfaceRoughness"": value from codes.wmo.int/wmdr}"
+comments,,WIGOSMetadataRecord/facility/ObservingFacility/topographyBathymetry/TopographyBathymetry,TopographyBathymetry,0..*,to be encoded as JSON and must use notation: value from codes.wmo.int/wmdr
+comments,,WIGOSMetadataRecord/facility/ObservingFacility/topographyBathymetry/TopographyBathymetry/relativeElevation/href,TopographyBathymetry,0..*,to be encoded as JSON and must use notation: value from codes.wmo.int/wmdr
+comments,,WIGOSMetadataRecord/facility/ObservingFacility/topographyBathymetry/TopographyBathymetry/topographicContext/href,TopographyBathymetry,0..*,to be encoded as JSON and must use notation: value from codes.wmo.int/wmdr
+comments,,WIGOSMetadataRecord/facility/ObservingFacility/topographyBathymetry/TopographyBathymetry/altitudeOrDepth/href,TopographyBathymetry,0..*,to be encoded as JSON and must use notation: value from codes.wmo.int/wmdr
+platform,,WIGOSMetadataRecord/facility/ObservingFacility/facilityType/href,FacilityType,0..1,
+comments,,>facilitySet,FacilitySet,0..1,to be encoded as JSON and must use notation: value from codes.wmo.int/wmdr
+history,,>FacilityLog,FacilityLog,0..1,"to be encoded in JSON for each WMDR facility attribute name, and must include date, time of day, user name, value to keep a historical record of those WMDR facility attribute maintaining a history (geolocation, climateZone, facilityLog, etc)"
+history,,WIGOSMetadataRecord/facility/ObservingFacility/territory/Territory/territoryName,,,"to be encoded in JSON for each WMDR facility attribute name, and must include date, time of day, user name, value to keep a historical record of those WMDR facility attribute maintaining a history (geolocation, climateZone, facilityLog, etc)"
+publisher_name,,,,,logged-in user (or machine) providing or editing the record
+Conventions,ACDD-1.3,,,,
+geospatial_bounds,,,,,inferred from facility geolocation with 0.001 degrees (ca. 100 m) slack
+license,https://creativecommons.org/licenses/by/4.0/,,,,
+date_created,,,,,
+date_modified,,,,,

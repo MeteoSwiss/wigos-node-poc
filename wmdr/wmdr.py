@@ -1,11 +1,20 @@
-from dataclasses import dataclass, field
-from typing import Optional, List, Union
+from __future__ import annotations
+
 import json
-import yaml
-from acdd import ACDD
-import xmltodict
-from pathlib import Path
 import warnings
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, List, Optional, Union
+
+import xmltodict
+import yaml
+
+from acdd.acdd import ACDD
+from utils.utils import (load_mapping_csv,
+                         parse_geolocation_to_acdd_fields, 
+                         resolve_path_recursive
+                         )
+
 
 @dataclass
 class WMDR20:
@@ -150,7 +159,9 @@ class WMDR10:
 
     This implementation uses the `xmltodict` package to convert XML to a dictionary.
     The metadata can then be exported to JSON and YAML formats.
-
+    The facility section of WMDR1.0 records can be converted to ACDD1.3 objects.
+    The observations section of a WMDR1.0 record can be converted to ACDD1.3 objects.
+    
     Attributes:
         data (dict): Parsed metadata as a nested dictionary.
     """
@@ -250,3 +261,213 @@ class WMDR10:
             exported_files.append(path)
 
         return exported_files
+
+    def facility_to_acdd(self, mapping: str | Path = "wmdr10_facility_to_acdd13.csv") -> ACDD:
+        """
+        Extract the ObservingFacility part from a WMDR10 record and map it to an ACDD object.
+
+        Args:
+            mapping (str | Path): Mapping file name or path to CSV.
+
+        Returns:
+            ACDD: ACDD metadata record representing the facility.
+        """
+        raw = self.strip_namespaces()
+        attributes = self._map_wmdr10_to_acdd(raw, mapping)
+        return ACDD(attributes=attributes)
+
+    # def observations_to_acdd(self, mapping: str | Path = "wmdr10_facility_to_acdd13") -> list[ACDD]:
+    #     """
+    #     Convert the observation metadata in WMDR10 to a list of ACDD records.
+
+    #     Args:
+    #         mapping (str | Path): Mapping file name or path to CSV.
+
+    #     Returns:
+    #         list[ACDD]: One ACDD record per observed variable (derived from ObservingCapability).
+    #     """
+    #     stripped = self.strip_namespaces()
+    #     caps = (
+    #         stripped.get("WIGOSMetadataRecord", {})
+    #         .get("facility", {})
+    #         .get("ObservingFacility", {})
+    #         .get("observingCapability", [])
+    #     )
+    #     if not isinstance(caps, list):
+    #         caps = [caps]
+
+    #     acdd_records = []
+    #     for cap in caps:
+    #         raw = cap.get("ObservingCapability", {})
+    #         attributes = self._map_wmdr10_to_acdd(raw, mapping)
+    #         acdd_records.append(ACDD(attributes=attributes))
+
+    #     return acdd_records
+
+    def _map_wmdr10_to_acdd(self, raw: dict[str, Any], mapping: str | Path) -> dict[str, Any]:
+        """
+        Apply a mapping from WMDR10 attributes to ACDD attributes.
+
+        Args:
+            raw (dict): Dictionary of extracted WMDR10 values.
+            mapping_file (str | Path): Path to mapping CSV file.
+
+        Returns:
+            dict[str, Any]: Dictionary of ACDD attributes.
+        """
+        df = load_mapping_csv(mapping)
+        result: dict[str, Any] = {}
+        unmapped: dict[str, Any] = {}
+
+        for row in df.iter_rows(named=True):
+            acdd_key = row["acdd_attribute"]
+            wmdr_path = row["wmdr10_path"]
+            default = row["default"] if row["default"] != "" else None
+
+            # Navigate WMDR10 path if provided
+            if wmdr_path:
+                parts = wmdr_path.split("/")
+                val = resolve_path_recursive(raw, parts)
+
+                if val is None:
+                    if default:
+                        result[acdd_key] = default
+                    else:
+                        unmapped[acdd_key] = f"Missing: {wmdr_path}"
+                else:
+                    # Special case for gml:pos
+                    if wmdr_path.endswith("pos") and isinstance(val, str):
+                        result.update(parse_geolocation_to_acdd_fields(val))
+                    else:
+                        result[acdd_key] = val
+
+            elif default:
+                result[acdd_key] = default
+
+        # Add keywords derived from observed variables
+        result["keywords"] = self._collect_observed_variables_keywords()
+        # if keywords:
+        #     result["keywords"] = ", ".join(keywords)
+
+        # Add comments derived from known mapping rows
+        comment_dict = self._collect_facility_comments(mapping)
+        result["comment"] = self._collect_facility_comments(mapping)
+        # if comment_dict:
+        #     result["comments"] = json.dumps(comment_dict, indent=2)
+
+            # Add all unmapped entries to comment
+        if unmapped:
+            result["unmapped"] = self._collect_unmapped_fields(unmapped)
+
+        return result
+
+    def _collect_facility_comments(self, mapping_file: str | Path) -> dict[str, str | list[str]]:
+        """
+        Extract all WMDR10 values designated for inclusion in the ACDD 'comments' field.
+
+        This looks for rows in the mapping CSV where:
+        - `acdd_attribute` == "comments"
+        - `wmdr10_path` ends with 'href'
+
+        For each such path:
+        - The second-to-last path segment becomes the comment key
+        - The resolved value is added to the result
+
+        Returns:
+            dict[str, str | list[str]]: Dictionary of clean comment entries.
+        """
+        df = load_mapping_csv(mapping_file)
+        raw = self.strip_namespaces()
+
+        comments: dict[str, list[str]] = {}
+
+        for row in df.iter_rows(named=True):
+            acdd_key = row["acdd_attribute"]
+            wmdr_path = row["wmdr10_path"]
+
+            if acdd_key == "comment" and wmdr_path.endswith("href"):
+                path_parts = wmdr_path.split("/")
+                if len(path_parts) < 2:
+                    continue  # malformed
+
+                comment_key = path_parts[-2]
+                val = resolve_path_recursive(raw, path_parts)
+
+                if val:
+                    if isinstance(val, str):
+                        comments.setdefault(comment_key, []).append(val)
+                    elif isinstance(val, list):
+                        comments.setdefault(comment_key, []).extend(
+                            v for v in val if isinstance(v, str)
+                        )
+                    elif isinstance(val, dict):
+                        href_val = val.get("href") or val.get("@xlink:href") or val.get("@href")
+                        if href_val:
+                            comments.setdefault(comment_key, []).append(href_val)
+
+        # Flatten single-element lists to just the string
+        for key, values in comments.items():
+            if isinstance(values, list) and len(values) == 1:
+                comments[key] = values[0]
+
+        return comments
+
+    def _collect_observed_variables_keywords(self) -> list[str]:
+        """
+        Extract observed variable hrefs from:
+        WIGOSMetadataRecord/facility/ObservingFacility/observation/ObservingCapability/observation/OM_Observation/observedProperty/href
+
+        Returns:
+            list[str]: List of observed variable hrefs to use as ACDD keywords.
+        """
+        try:
+            xml_dict = self.strip_namespaces()
+            keywords = []
+
+            facility = (
+                xml_dict.get("WIGOSMetadataRecord", {})
+                        .get("facility", {})
+                        .get("ObservingFacility", {})
+            )
+
+            observations = facility.get("observation", [])
+            if not isinstance(observations, list):
+                observations = [observations]
+
+            for obs in observations:
+                capabilities = obs.get("ObservingCapability", [])
+                if not isinstance(capabilities, list):
+                    capabilities = [capabilities]
+
+                for cap in capabilities:
+                    obs_struct = cap.get("observation", {})
+                    if not isinstance(obs_struct, list):
+                        obs_struct = [obs_struct]
+
+                    for o in obs_struct:
+                        href = (
+                            o.get("OM_Observation", {})
+                             .get("observedProperty", {})
+                             .get("href")
+                        )
+                        if href:
+                            keywords.append(href)
+
+            return keywords
+        except Exception as e:
+            raise ValueError(f"Error extracting observed variables from XML: {e}")
+
+    def _collect_unmapped_fields(self, comment_data: dict[str, str]) -> str:
+        """
+        Build a JSON-encoded comment field containing information on missing or fallback values.
+
+        Args:
+            comment_data (dict): Dictionary mapping ACDD attribute names to notes or fallback info.
+
+        Returns:
+            str: JSON string to be used as ACDD 'comment' attribute.
+        """
+        try:
+            return json.dumps(comment_data, indent=2, sort_keys=True, ensure_ascii=False)
+        except Exception as e:
+            raise ValueError(f"Failed to encode ACDD comment data: {e}")
