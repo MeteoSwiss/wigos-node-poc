@@ -1,12 +1,14 @@
 from __future__ import annotations
+
+import json
+import warnings
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Optional
-import json
-import yaml
-import warnings
+from typing import ClassVar, List, Optional, Union
+
 import polars as pl
-import zipfile
+import yaml
 
 
 @dataclass
@@ -212,3 +214,15 @@ class ACDD:
             acdd = cls()
             acdd.from_geojson(geo)
             return acdd
+        
+    @classmethod
+    def facility_from_wmdr10(cls, path: Union[str, Path]) -> ACDD:
+        """Extract facility-level ACDD from WMDR10 XML."""
+    [...]
+
+
+    @classmethod
+    def observation_from_wmdr10(cls, path: Union[str, Path]) -> List[ACDD]:
+        """Extract observation-level ACDD list from WMDR10 XML."""
+    [...]
+
