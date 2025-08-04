@@ -7,36 +7,36 @@ from utils.utils import (load_mapping_csv,
                          parse_geolocation_to_acdd_fields)
 
 
-@pytest.mark.parametrize("mapping_name", [
-    "wmdr10_facility_to_acdd13",
+@pytest.mark.parametrize("mapping_file_path", [
+    "mappings/wmdr10_facility_to_acdd13.csv",
     # Add additional mappings here as needed
 ])
-def test_load_real_mapping_csv(mapping_name):
+def test_load_real_mapping_csv(mapping_file_path):
     """
     Test that the specified mapping CSV can be loaded and contains required columns.
     """
     try:
-        df = load_mapping_csv(mapping_name)
+        mappings = load_mapping_csv(mapping_file_path)
     except FileNotFoundError as e:
         raise AssertionError(
-            f"\n❌ Mapping file not found: '{mapping_name}.csv'\n"
+            f"\n❌ Mapping file not found: '{mapping_file_path}'\n"
             f"🔍 Expected under 'mappings/' directory.\n"
             f"💡 Make sure the file exists and is correctly named.\n"
             f"Original error: {e}"
         )
 
-    if df.shape[0] == 0:
+    if mappings == list() or mappings is None:
         raise AssertionError(
-            f"\n❌ Mapping file '{mapping_name}.csv' is empty.\n"
+            f"\n❌ Mapping file '{mapping_file_path}' is empty.\n"
             f"💡 Add at least one mapping row with valid WMDR1.0 and ACDD13 keys."
         )
 
-    required_columns = ["wmdr10_path", "acdd_attribute"]
-    missing = [col for col in required_columns if col not in df.columns]
+    required_keys = ["acdd_attribute", "wmdr10_path", "wmdr10_subpath", "default"]
+    missing = [k for k in required_keys if any(k not in row for row in mappings)]
     if missing:
         raise AssertionError(
-            f"\n❌ Mapping file '{mapping_name}.csv' is missing required columns: {missing}\n"
-            f"💡 Ensure the CSV includes these columns exactly: {required_columns}"
+            f"\n❌ Mapping file '{mapping_file_path}' is missing required columns: {missing}\n"
+            f"💡 Ensure the CSV includes these columns exactly: {required_keys}"
         )
 
 
