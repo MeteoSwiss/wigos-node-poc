@@ -107,7 +107,7 @@ class ACDD:
         )
         invalid = [key for key in d if key not in valid_keys]
         if invalid:
-            warnings.warn(f"Invalid ACDD keys: {', '.join(invalid)}", UserWarning)
+            warnings.warn(f"Invalid ACDD keys: {invalid}", UserWarning)
         return invalid
 
     def to_json(self) -> str:
@@ -215,14 +215,3 @@ class ACDD:
             acdd.from_geojson(geo)
             return acdd
         
-    @classmethod
-    def facility_from_wmdr10(cls, path: Union[str, Path]) -> ACDD:
-        """Extract facility-level ACDD from WMDR10 XML."""
-    [...]
-
-
-    @classmethod
-    def observation_from_wmdr10(cls, path: Union[str, Path]) -> List[ACDD]:
-        """Extract observation-level ACDD list from WMDR10 XML."""
-    [...]
-
