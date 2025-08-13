@@ -5,6 +5,7 @@ import warnings
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
@@ -196,10 +197,6 @@ class WMDR10:
 
     def _simplify(self) -> None:
         """
-        WMDR 1.0 simplification (robust, no data loss)
-
-        Pipeline (chosen for correctness & stability)
-        ---------------------------------------------
         1) Strip XML namespaces.
         2) Atomic simplifications (single-pass, recursive):
         - @xsi:nil → None
@@ -913,7 +910,8 @@ class WMDR10:
         result['project'] = [ele for ele in keywords if 'programAffiliation' in ele]
 
         # Store remaining keywords as list of JSON stubs
-        result["keywords"] = [ele for ele in keywords if 'programAffiliation' not in ele]
+        # result["keywords"] = str([ele for ele in keywords if 'programAffiliation' not in ele])
+        result["keywords"] = ",".join([str(ele) for ele in keywords if 'programAffiliation' not in ele])
 
         return ACDD(result)
 
@@ -1018,9 +1016,14 @@ class WMDR10:
         if mapping_row["wmdr10_simplified_path"].endswith("geospatialLocation"):
             path = mapping_row["wmdr10_simplified_path"].split("/")
             val = self._resolve_path_recursive(self.data, path)
-            if isinstance(val, list):
-                # [TODO] Do not select the first element, but look for the one with the newest beginPosition
-                val = val[0]['geoLocation']
+            if isinstance(val, list):                
+                val = max(val,
+                          key=lambda x: datetime.fromisoformat(x.get('beginPosition', '0001-01-01T00:00:00+00:00').replace('Z', '+00:00'))
+                          )['geoLocation']
+
+            if isinstance(val, dict):
+                val = val['geoLocation']
+
             if isinstance(val, str):
                 try:
                     lat_str, lon_str, *alt_str = val.strip().split()
