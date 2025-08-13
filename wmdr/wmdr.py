@@ -196,171 +196,587 @@ class WMDR10:
 
     def _simplify(self) -> None:
         """
-        Simplify self.data in place by performing the following steps:
+        WMDR 1.0 simplification (robust, no data loss)
 
-        I. Namespace Handling
-        1. Strip all XML namespaces, including known prefixes and @xmlns entries
-
-        II. Structural Pruning
-        2. Keep only 'headerInformation' and 'facility' under 'WIGOSMetadataRecord'
-        3. Remove any key named 'boundedBy' (case-insensitive)
-        4. Remove any 'type': 'simple' or '@xlink:type': 'simple' entries
-
-        III. Flatten Atomic Wrappers
-        5. Replace {'CharacterString': value} → value
-        6. Replace {'@xlink:href': value} → value
-        7. Replace {'@codeSpace': value} → value
-        8. Replace {'@codeSpace': ..., '#text': ...} → '#text'
-        9. Replace {'@xsi:nil': 'true'} → None
-        10. Replace {'@codeList': ..., '@codeListValue': ...} → '@codeList'
-        11. Replace {'pos': value} → value
-
-        IV. Structural Unwrapping
-        12. Unwrap {'foo': {'Foo': {...}}} and {'Foo': {'foo': {...}}} if key names match case-insensitively
-        13. Unwrap ISO containers like {'CI_*': {...}}, {'MD_*': {...}}, etc.
-            Note: This step only applies when ISO container is nested under another key
-        14. Unwrap {'TimePeriod': {...}} inside 'validPeriod'
-        15. Unwrap top-level structures and list entries with single-key containers:
-            'Process', 'GeospatialLocation', 'Point', 'DataGeneration', 'ResponsibleParty',
-            'ObservingFacility', 'ProgramAffiliation', 'Header', 'ObservingCapability', 'OM_Observation',
-            'ReportingStatus', 'linkage'
-        16. Rename 'headerInformation' to 'header'
-        17. Rename {'linkage': {'URL': value}} to {'url': value}
-        18. Unwrap symmetric keys within lists: [{'Foo': {...}}] → [{...}]
-        19. Unwrap [{'Foo': value}] → [value] if 'Foo' matches parent key or unwrap to list of dicts otherwise
-
-        V. Cleanup
-        20. Recursively simplify nested dictionaries and lists
-        21. Replace empty dictionaries {} with None
+        Pipeline (chosen for correctness & stability)
+        ---------------------------------------------
+        1) Strip XML namespaces.
+        2) Atomic simplifications (single-pass, recursive):
+        - @xsi:nil → None
+        - @xlink:href → value
+        - ('@codeSpace', '#text') → '#text'
+        - Drop '@codeListValue' (keep '@codeList' if present)
+        - CharacterString → value
+        - pos → value
+        - linkage.URL → {'url': URL}
+        - geoLocation: {'Point': '...'} or {'Point': {'pos': '...'}} or {'pos': '...'} → '...'
+        - Hoist linkage.url / onlineResource.linkage.url → parent['url']
+        - validPeriod: MERGE inner fields (e.g., beginPosition/endPosition) into parent
+            (do NOT drop None values)
+        3) Explicitly unwrap facility.ObservingFacility → merge into facility (even with siblings).
+        4) Promote facility.observation → top-level 'observations' (list). Remove the source keys.
+        5) ISO singletons unwrap (CI_*, MD_*, OM_*, DQ_*, EX_*, GM_*, LI_*, PT_*, RS_*, SV_*) anywhere.
+        6) Generic same-name collapse (foo:{Foo:{...}} and list variants), run to fixed point.
+        This also collapses responsibleParty → responsibleParty chains.
+        7) Build flat observations (preserving info):
+        - unwrap {'observingcapability': {...}} list items
+        - expand inner 'observation' (dict or list); unwrap {'om_observation': {...}} inside
+        - per inner observation:
+            • drop featureOfInterest
+            • drop phenomenonTime/resultTime if None or {}
+            • unwrap procedure/process; collect deployment(s) case-insensitively anywhere under it;
+            normalize deployment:
+                - deployedEquipment → Equipment
+                - dataGeneration → list
+            • NEW: if result → ResultSet → distributionInfo → distributor exists,
+                    hoist to top-level "distributor" and drop "result"
+        8) Normalize “uniform list” wrappers across the tree:
+        - programAffiliation: [{ '@xlink:href': url }, ...] → [url, ...]
+        - electronicMailAddress: [{ 'CharacterString': v }, ...] → [v, ...]
+        9) Rename keys (case-insensitive):
+        - schedule → coverage  (safe merge)
+        10) Final scrub: drop stray 'featureOfInterest' / 'om_observation'. Do NOT blanket-drop None.
+        11) Rename headerInformation → header.
         """
 
         NAMESPACES_TO_STRIP = {
-            'gml', 'xlink', 'wmdr', 'gco', 'gmd', 'ns6', 'ns7',
-            'om', 'ns9', 'sam', 'sams', 'xsi'
+            'gml', 'xlink', 'wmdr', 'gco', 'gmd', 'gmlexr', 'om', 'metce', 'xsi', 'sams', 'sam'
         }
-
         ISO_PREFIXES = ("CI_", "MD_", "OM_", "DQ_", "EX_", "GM_", "LI_", "PT_", "RS_", "SV_")
 
-        UNWRAP_KEYS = {
-            'Point', 'GeospatialLocation', 'Process', 'DataGeneration', 'ResponsibleParty',
-            'ObservingFacility', 'ProgramAffiliation', 'Header', 'ObservingCapability',
-            'OM_Observation', 'ReportingStatus', 'linkage'
-        }
+        # ---------- small helpers ----------
+
+        def keynorm(s):
+            return ''.join(ch for ch in str(s).lower() if ch.isalnum())
+
+        def same_name(a, b):
+            return keynorm(a) == keynorm(b)
+
+        def normalize_to_list(val):
+            if val is None:
+                return []
+            if isinstance(val, list):
+                return val
+            if isinstance(val, dict):
+                return [val]
+            return [val]
+
+        def href_list_to_strings(val):
+            if isinstance(val, list) and all(isinstance(x, dict) and set(x.keys()) == {'@xlink:href'} for x in val):
+                return [x['@xlink:href'] for x in val]
+            return val
+
+        def charstring_list_to_strings(val):
+            """Convert uniform [{'CharacterString': v}, ...] → [v, ...] (case-insensitive key)."""
+            if not isinstance(val, list) or not val:
+                return val
+            out = []
+            for x in val:
+                if isinstance(x, dict) and len(x) == 1:
+                    (k, v), = x.items()
+                    if k.lower() == "characterstring":
+                        out.append(v)
+                    else:
+                        return val
+                else:
+                    return val
+            return out
+
+        def is_iso_singleton(dct):
+            if isinstance(dct, dict) and len(dct) == 1:
+                (k, _), = dct.items()
+                return any(k.startswith(p) for p in ISO_PREFIXES)
+            return False
+
+        def merge_into(dst, src):
+            for k, v in src.items():
+                dst[k] = v
+
+        def drop_keys_ci(obj, keys_lower):
+            if isinstance(obj, dict):
+                for kk in list(obj.keys()):
+                    if kk.lower() in keys_lower:
+                        obj.pop(kk, None)
+                    else:
+                        drop_keys_ci(obj[kk], keys_lower)
+            elif isinstance(obj, list):
+                for i in range(len(obj)):
+                    drop_keys_ci(obj[i], keys_lower)
+            return obj
+
+        def pop_ci(d: dict, name: str):
+            """Pop a key case-insensitively; return value or None."""
+            if not isinstance(d, dict):
+                return None
+            target = keynorm(name)
+            for k in list(d.keys()):
+                if keynorm(k) == target:
+                    return d.pop(k)
+            return None
+
+        def get_ci(d: dict, name: str):
+            """Get a value case-insensitively (without popping)."""
+            if not isinstance(d, dict):
+                return None
+            target = keynorm(name)
+            for k, v in d.items():
+                if keynorm(k) == target:
+                    return v
+            return None
+
+        def unwrap_single_key(obj):
+            """Unwrap dicts like {'Foo': {...}} repeatedly → {...}."""
+            while isinstance(obj, dict) and len(obj) == 1:
+                (_, obj), = obj.items()
+            return obj
+
+        def collect_by_key_ci(obj, target_norm: str):
+            """Collect values for keys whose normalized name == target_norm, at any depth."""
+            out = []
+            def walk(o):
+                if isinstance(o, dict):
+                    for k, v in o.items():
+                        if keynorm(k) == target_norm:
+                            out.append(v)
+                        walk(v)
+                elif isinstance(o, list):
+                    for el in o:
+                        walk(el)
+            walk(obj)
+            return out
+
+        def rename_key_ci(obj, from_name: str, to_name: str):
+            """Rename keys recursively, case-insensitive; safe-merge dict→dict."""
+            if isinstance(obj, dict):
+                # First recurse children
+                for k in list(obj.keys()):
+                    obj[k] = rename_key_ci(obj[k], from_name, to_name)
+                # Then rename here
+                for k in list(obj.keys()):
+                    if keynorm(k) == keynorm(from_name):
+                        val = obj.pop(k)
+                        # Merge if to_name exists and both are dicts
+                        if to_name in obj and isinstance(obj[to_name], dict) and isinstance(val, dict):
+                            merge_into(obj[to_name], val)
+                        elif to_name in obj and isinstance(obj[to_name], list) and isinstance(val, list):
+                            obj[to_name] = obj[to_name] + val
+                        else:
+                            obj[to_name] = val
+            elif isinstance(obj, list):
+                for i in range(len(obj)):
+                    obj[i] = rename_key_ci(obj[i], from_name, to_name)
+            return obj
+
+        # ---------- domain helpers ----------
+
+        def normalize_deployment(dep):
+            """
+            Normalize a deployment object:
+            - unwrap {'Deployment': {...}} (and other single-key wrappers)
+            - deployedEquipment → Equipment (unwrap inner wrapper if needed)
+            - dataGeneration → list (case-insensitive)
+            - NEW: drop identifier if it is exactly {'@codeSpace': ...}
+            """
+            dep = unwrap_single_key(dep)
+            if not isinstance(dep, dict):
+                return {'_unexpected_deployment': dep}
+
+            # deployedEquipment → Equipment
+            for k in list(dep.keys()):
+                if keynorm(k) == 'deployedequipment':
+                    de = unwrap_single_key(dep.pop(k))
+                    if isinstance(de, dict) and 'Equipment' in de:
+                        dep['Equipment'] = de['Equipment']
+                    elif isinstance(de, dict):
+                        for kk, vv in de.items():
+                            dep[kk] = vv
+                    else:
+                        dep['Equipment'] = de
+                    break
+
+            # dataGeneration → list
+            for k in list(dep.keys()):
+                if keynorm(k) == 'datageneration':
+                    dg = dep.pop(k)
+                    dep['dataGeneration'] = [unwrap_single_key(x) if isinstance(x, dict) else x
+                                            for x in (dg if isinstance(dg, list) else [dg])]
+                    break
+
+            # drop identifier == {'@codeSpace': ...}
+            for k in list(dep.keys()):
+                if keynorm(k) == 'identifier':
+                    idv = dep[k]
+                    if isinstance(idv, dict) and any(kk.lower().strip() in ('@codespace',) for kk in idv.keys()) and len(idv) == 1:
+                        dep.pop(k, None)
+                    break
+
+            return dep
+
+        def flatten_observation_dict(inner):
+            """
+            Flatten a single inner observation:
+            - drop featureOfInterest
+            - drop phenomenonTime/resultTime if None or {}
+            - unwrap procedure/process; collect deployment(s) anywhere under it; normalize deployment objects
+            - NEW: hoist result→ResultSet→distributionInfo→distributor → top-level 'distributor'; drop 'result'
+            """
+            if not isinstance(inner, dict):
+                return {'_unexpected_observation': inner}
+
+            inner.pop('featureOfInterest', None)
+
+            # Drop null/empty times (keep real TimeInstant/TimePeriod objects)
+            for tkey in ('phenomenonTime', 'resultTime'):
+                if tkey in inner:
+                    tv = inner[tkey]
+                    if tv is None or (isinstance(tv, dict) and not tv):
+                        inner.pop(tkey, None)
+
+            # Extract procedure / process (case-insensitive) and remove it from inner
+            proc = pop_ci(inner, 'procedure')
+            if proc is None:
+                proc = pop_ci(inner, 'process')
+
+            deployments_all = []
+            if proc is not None:
+                for proc_item in (proc if isinstance(proc, list) else [proc]):
+                    hits = collect_by_key_ci(proc_item, 'deployment')
+                    for hit in hits:
+                        for dpl in (hit if isinstance(hit, list) else [hit]):
+                            deployments_all.append(unwrap_single_key(dpl))
+                    if not hits:
+                        cand = unwrap_single_key(proc_item)
+                        if isinstance(cand, dict) and any(keynorm(k) in ('deployedequipment', 'datageneration') for k in cand.keys()):
+                            deployments_all.append(cand)
+
+            if deployments_all:
+                inner['deployment'] = [normalize_deployment(d) for d in deployments_all]
+
+            # ---- NEW: unwrap result → ResultSet → distributionInfo → distributor ----
+            if 'result' in inner and isinstance(inner['result'], (dict, list)):
+                # handle both dict and single-element list
+                rnode = inner['result']
+                if isinstance(rnode, list) and len(rnode) == 1:
+                    rnode = rnode[0]
+                rnode = unwrap_single_key(rnode) if isinstance(rnode, dict) else rnode
+                if isinstance(rnode, dict):
+                    # After unwrap, either we are at {'distributionInfo': {...}} or deeper
+                    dset = rnode
+                    # tolerate 'ResultSet' wrapper if still present
+                    if get_ci(dset, 'ResultSet') is not None:
+                        dset = get_ci(dset, 'ResultSet')
+                    dset = unwrap_single_key(dset) if isinstance(dset, dict) else dset
+                    if isinstance(dset, dict):
+                        di = get_ci(dset, 'distributionInfo')
+                        if isinstance(di, dict):
+                            dist = get_ci(di, 'distributor')
+                            if dist is not None:
+                                inner['distributor'] = unwrap_single_key(dist)
+                                inner.pop('result', None)  # remove only when successfully extracted
+
+            return inner
+
+        # ---------- core passes ----------
 
         def strip_ns(obj):
             if isinstance(obj, dict):
-                new_dict = {}
+                out = {}
                 for k, v in obj.items():
                     if k.startswith('@xmlns') or k == 'xmlns':
                         continue
-                    key_base = k.split(':')[-1] if ':' in k else k
-                    ns_prefix = k.split(':')[0] if ':' in k else ''
-                    if ns_prefix in NAMESPACES_TO_STRIP:
-                        k = key_base
-                    elif '}' in k:
-                        k = k.split('}')[-1]
-                    new_dict[k] = strip_ns(v)
-                return new_dict
-            elif isinstance(obj, list):
-                return [strip_ns(item) for item in obj]
+                    key = k
+                    if ':' in key:
+                        prefix, base = key.split(':', 1)
+                        if prefix in NAMESPACES_TO_STRIP:
+                            key = base
+                    if '}' in key:
+                        key = key.split('}', 1)[-1]
+                    out[key] = strip_ns(v)
+                return out
+            if isinstance(obj, list):
+                return [strip_ns(x) for x in obj]
             return obj
 
-        def unwrap_single_key_dict(v, parent_key=None):
-            if isinstance(v, dict) and len(v) == 1:
-                key, val = next(iter(v.items()))
-                if key in UNWRAP_KEYS:
-                    return simplify_dict(val)
-            if parent_key in UNWRAP_KEYS and isinstance(v, dict):
-                return simplify_dict(v)
+        def _extract_geolocation_value(v):
+            """Return 'lat lon alt' from geoLocation dicts."""
+            if isinstance(v, dict):
+                if 'Point' in v:
+                    p = v['Point']
+                    if isinstance(p, dict) and 'pos' in p:
+                        return p['pos']
+                    return p
+                if 'pos' in v:
+                    return v['pos']
             return v
 
-        def simplify_atomic_wrappers(k, v):
+        def simplify_atomic_at(parent, key, val):
+            """Atomic simplifications. May MERGE/HOIST into parent (validPeriod, linkage)."""
+            v = val
             if isinstance(v, dict):
+                # nil → None
                 if v.get('@xsi:nil') == 'true':
                     return None
+                # inline xlink href
                 if '@xlink:href' in v:
                     return v['@xlink:href']
+                # codeSpace/#text → value
                 if '@codeSpace' in v and '#text' in v:
                     return v['#text']
-                if set(v.keys()) == {'@codeList', '@codeListValue'}:
-                    return v['@codeList']
+                # drop @codeListValue; keep @codeList if present
+                if '@codeListValue' in v:
+                    v = {kk: vv for kk, vv in v.items() if kk != '@codeListValue'}
+                    if set(v.keys()) == {'@codeList'}:
+                        return v['@codeList']
+                # pos → value
                 if list(v.keys()) == ['pos']:
                     return v['pos']
+                # CharacterString → value
                 if list(v.keys()) == ['CharacterString']:
                     return v['CharacterString']
-                if k == 'validPeriod' and isinstance(v.get('TimePeriod'), dict):
-                    return simplify_dict(v['TimePeriod'])
-                if k == 'linkage' and list(v.keys()) == ['URL']:
+                # linkage.URL → {'url': URL}
+                if key == 'linkage' and list(v.keys()) == ['URL']:
                     return {'url': v['URL']}
+                # geoLocation variants → string
+                if keynorm(key) == 'geolocation':
+                    return _extract_geolocation_value(v)
+                # Hoist onlineResource.linkage.url → parent['url']
+                if keynorm(key) in ('onlineresource', 'onlineresources'):
+                    link = v.get('linkage')
+                    if isinstance(link, dict):
+                        if 'url' in link:
+                            parent['url'] = link['url']
+                            return '__DROPPED__'
+                        if 'URL' in link:
+                            parent['url'] = link['URL']
+                            return '__DROPPED__'
+                # Hoist plain linkage.url → parent['url']
+                if keynorm(key) == 'linkage' and ('url' in v or 'URL' in v):
+                    parent['url'] = v.get('url', v.get('URL'))
+                    return '__DROPPED__'
+                # validPeriod: MERGE fields into parent; KEEP None values
+                if key.lower() == 'validperiod':
+                    inner = v.get('TimePeriod', v)
+                    if isinstance(inner, dict):
+                        parent.pop(key, None)
+                        merge_into(parent, inner)
+                        return '__DROPPED__'
             return v
 
-        def simplify_dict(d):
+        def atomic_pass(d):
+            """Apply atomic simplifications recursively."""
             if not isinstance(d, dict):
                 return d
-
+            # focus WIGOSMetadataRecord if present
             if "WIGOSMetadataRecord" in d:
                 d = d["WIGOSMetadataRecord"]
-            if '@xsi:schemaLocation' in d:
-                d.pop('@xsi:schemaLocation')
 
+            # prune noisy attributes
+            d.pop('@xsi:schemaLocation', None)
+            # drop boundedBy and 'type':'simple' / '@xlink:type':'simple'
             d = {
                 k: v for k, v in d.items()
-                if not ((k == 'type' or k == '@xlink:type') and v == 'simple') and k.lower() != 'boundedby'
+                if not ((k == 'type' or k == '@xlink:type') and v == 'simple')
+                and k.lower() != 'boundedby'
             }
 
+            # atomic at this level
             for k in list(d):
-                d[k] = simplify_atomic_wrappers(k, d[k])
+                val = simplify_atomic_at(d, k, d[k])
+                if val != '__DROPPED__':
+                    d[k] = val
+                else:
+                    d.pop(k, None)
 
-            for k in list(d):
-                v = d[k]
-                if isinstance(v, dict) and len(v) == 1:
-                    inner_k = next(iter(v))
-                    if inner_k.lower() == k.lower():
-                        d[k] = simplify_dict(v[inner_k])
-
-            for k in list(d):
-                if isinstance(d[k], dict):
-                    d[k] = unwrap_single_key_dict(d[k], parent_key=k)
-
+            # recurse
             for k in list(d):
                 v = d[k]
-                if isinstance(v, dict) and len(v) == 1:
-                    inner_k = next(iter(v))
-                    if any(inner_k.startswith(prefix) for prefix in ISO_PREFIXES):
-                        d[k] = simplify_dict(v[inner_k])
-
-            for k in list(d):
-                v = d[k]
-                if isinstance(v, list):
-                    new_list = []
-                    for item in v:
-                        if isinstance(item, dict) and len(item) == 1:
-                            inner_k = next(iter(item))
-                            inner_val = item[inner_k]
-                            if inner_k.lower() == k.lower():
-                                item = simplify_dict(inner_val)
-                            elif isinstance(inner_val, dict):
-                                item = {inner_k.lower(): simplify_dict(inner_val)}
-                            else:
-                                item = {inner_k.lower(): inner_val}
-                        elif isinstance(item, dict):
-                            item = simplify_dict(item)
-                        new_list.append(item)
-                    d[k] = new_list
-                elif isinstance(v, dict):
-                    d[k] = simplify_dict(v)
-
-            for k in list(d):
-                if isinstance(d[k], dict) and not d[k]:
-                    d[k] = None
-
-            if 'headerInformation' in d:
-                d['header'] = d.pop('headerInformation')
+                if isinstance(v, dict):
+                    d[k] = atomic_pass(v)
+                elif isinstance(v, list):
+                    d[k] = [atomic_pass(x) if isinstance(x, dict) else x for x in v]
 
             return d
 
+        def unwrap_observingfacility(root_obj):
+            """Step 3: unwrap facility.ObservingFacility → merge into facility (even with siblings present)."""
+            fac = root_obj.get('facility')
+            if isinstance(fac, dict):
+                for ik in list(fac.keys()):
+                    if keynorm(ik) == 'observingfacility' and isinstance(fac[ik], dict):
+                        child = fac.pop(ik)
+                        merge_into(fac, child)
+
+        def iso_unwrap_anywhere(obj):
+            """Unwrap ISO singletons in dict values and list elements."""
+            if isinstance(obj, dict):
+                if is_iso_singleton(obj):
+                    (_, inner), = obj.items()
+                    return iso_unwrap_anywhere(inner)
+                for k in list(obj.keys()):
+                    v = obj[k]
+                    if is_iso_singleton(v):
+                        (_, inner), = v.items()
+                        obj[k] = iso_unwrap_anywhere(inner)
+                    else:
+                        obj[k] = iso_unwrap_anywhere(v)
+                return obj
+            if isinstance(obj, list):
+                new = []
+                for el in obj:
+                    if is_iso_singleton(el):
+                        (_, inner), = el.items()
+                        new.append(iso_unwrap_anywhere(inner))
+                    else:
+                        new.append(iso_unwrap_anywhere(el))
+                return new
+            return obj
+
+        # Generic same-name collapse (dicts + list elements), run to fixed point
+        def _collapse_same_name_wrappers(obj, parent_key=None):
+            changed = False
+
+            if isinstance(obj, dict):
+                # Recurse first, passing child's key as parent_key
+                for k in list(obj.keys()):
+                    if _collapse_same_name_wrappers(obj[k], k):
+                        changed = True
+
+                # Then collapse same-name children inside each dict value (handles chains)
+                for k in list(obj.keys()):
+                    v = obj[k]
+                    if isinstance(v, dict):
+                        while True:
+                            found = None
+                            for ik, iv in list(v.items()):
+                                if isinstance(iv, dict) and same_name(ik, k):
+                                    found = (ik, iv)
+                                    break
+                            if not found:
+                                break
+                            ik, inner = found
+                            v.pop(ik, None)
+                            for kk, vv in inner.items():
+                                v[kk] = vv
+                            changed = True
+                return changed
+
+            if isinstance(obj, list):
+                for i, el in enumerate(list(obj)):
+                    progressed = False
+                    while isinstance(el, dict) and len(el) == 1:
+                        (ik, iv), = el.items()
+                        if parent_key is not None and same_name(ik, parent_key):
+                            el = iv
+                            progressed = True
+                            changed = True
+                        else:
+                            break
+                    if progressed:
+                        obj[i] = el
+                    if _collapse_same_name_wrappers(obj[i], parent_key):
+                        changed = True
+                return changed
+
+            return changed
+
+        # ---------- pipeline (ordered) ----------
+
+        # 1) strip namespaces
         self.data = strip_ns(self.data)
-        self.data = simplify_dict(self.data)
+
+        # 2) atomic simplifications (recursive)
+        self.data = atomic_pass(self.data)
+
+        # 3) explicit unwrap of facility.ObservingFacility
+        unwrap_observingfacility(self.data)
+
+        # 4) promote facility.observation → observations (robust)
+        fac = self.data.get('facility')
+        if isinstance(fac, dict):
+            obs_blocks = []
+            if 'observation' in fac:
+                obs_blocks.extend(normalize_to_list(fac['observation']))
+            inner_of = fac.get('ObservingFacility')
+            if isinstance(inner_of, dict) and 'observation' in inner_of:
+                obs_blocks.extend(normalize_to_list(inner_of['observation']))
+                inner_of.pop('observation', None)
+            if obs_blocks:
+                existing = self.data.get('observations')
+                self.data['observations'] = (normalize_to_list(existing) + obs_blocks) if existing else obs_blocks
+                fac.pop('observation', None)
+
+        # 5) ISO unwrap anywhere (dicts & list elements)
+        self.data = iso_unwrap_anywhere(self.data)
+
+        # 6) generic same-name collapse (fixed-point)
+        while _collapse_same_name_wrappers(self.data):
+            pass
+
+        # 7) Build flat observations
+        root = self.data
+        if 'observations' in root and isinstance(root['observations'], list):
+            built = []
+            for item in root['observations']:
+                # unwrap {"observingcapability": {...}} items
+                if isinstance(item, dict) and len(item) == 1:
+                    (only_k, only_v), = item.items()
+                    if only_k.lower() == 'observingcapability':
+                        item = only_v
+                if not isinstance(item, dict):
+                    built.append(item)
+                    continue
+
+                # normalize base-level programAffiliation (uniform href-lists → strings)
+                if 'programAffiliation' in item:
+                    item['programAffiliation'] = href_list_to_strings(item['programAffiliation'])
+
+                inner_obs = item.get('observation')
+                if inner_obs is None:
+                    built.append(item)
+                    continue
+
+                for inner in normalize_to_list(inner_obs):
+                    # unwrap {'om_observation': {...}} if present
+                    if isinstance(inner, dict) and len(inner) == 1:
+                        (ik, iv), = inner.items()
+                        if ik.lower() == 'om_observation':
+                            inner = iv
+                    flat = flatten_observation_dict(inner) if isinstance(inner, dict) else {'_unexpected_observation': inner}
+                    out = {k: v for k, v in item.items() if k != 'observation'}
+                    out.update(flat)
+                    built.append(out)
+
+            root['observations'] = built
+
+        # Run same-name collapse once more post-expansion (cleans responsibleParty chains, etc.)
+        while _collapse_same_name_wrappers(self.data):
+            pass
+
+        # 8) normalize uniform list wrappers everywhere
+        def normalize_lists_inplace(obj):
+            if isinstance(obj, dict):
+                for k in list(obj.keys()):
+                    v = obj[k]
+                    if isinstance(v, list):
+                        obj[k] = href_list_to_strings(v)
+                        obj[k] = charstring_list_to_strings(obj[k])
+                    normalize_lists_inplace(obj[k])
+            elif isinstance(obj, list):
+                for i in range(len(obj)):
+                    obj[i] = normalize_lists_inplace(obj[i])
+            return obj
+        normalize_lists_inplace(self.data)
+
+        # 9) rename keys
+        self.data = rename_key_ci(self.data, 'schedule', 'coverage')
+
+        # 10) final scrub (targeted)
+        drop_keys_ci(self.data, {"featureofinterest", "om_observation"})
+        # NOTE: do NOT drop None globally (e.g., keep endPosition=None if present)
+
+        # 11) rename(s) last
+        if 'headerInformation' in self.data:
+            self.data['header'] = self.data.pop('headerInformation')
 
 
     def to_xml(self, output_path: str | Path = None, pretty: bool = True, encoding: str = "utf-8") -> str | None:
