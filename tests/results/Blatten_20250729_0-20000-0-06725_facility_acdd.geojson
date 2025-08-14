@@ -3,8 +3,8 @@
   "geometry": {
     "type": "Point",
     "coordinates": [
-      7.8232,
-      46.4204
+      46.4204,
+      7.8232
     ]
   },
   "properties": {
@@ -34,14 +34,14 @@
     "time_coverage_start": "2000-08-17Z",
     "time_coverage_end": "2025-05-28Z",
     "time_coverage_duration": "[TODO]",
-    "creator_type": "[TODO]",
+    "creator_type": "institution",
     "publisher_type": "institution",
     "publisher_institution": "World Meteorological Organization WMO and Federal Office for Meteorology and Climatology MeteoSwiss",
     "program": "WMO Integrated Global Observing System WIGOS",
     "source": "OSCAR/Surface",
     "comment": "wmdr:facility",
     "keywords_vocabulary": "codes.wmo.int/wmdr",
-    "platform": "0-20000-0-06725,0-756-1-Blatten",
+    "platform": "0-20000-0-06725",
     "platform_vocabulary": "oscar.wmo.int/surface",
     "creator_name": "[TODO]: extract from 'owner'",
     "creator_email": "[TODO]: extract from 'owner'",

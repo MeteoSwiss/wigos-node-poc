@@ -9,6 +9,7 @@ from typing import ClassVar, List, Optional, Union
 
 import polars as pl
 import yaml
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -132,60 +133,74 @@ class ACDD:
                 "type": "Feature",
                 "geometry": {
                     "type": "Point",
-                    "coordinates": [lon_center, lat_center]
+                    "coordinates": [lat_center, lon_center]
                 },
                 "properties": self.attributes
             }
         else:
             raise ValueError("Missing lat/lon bounds for GeoJSON export")
 
-    def to_oasis(self) -> dict:
-        """
-        Convert an ACDD record to an OASIS-style Feature.
+    def to_oasis(
+        self,
+        href: str = "dummy",
+        version: str = "v04",
+        *,
+        content_encoding: str = "utf-8",
+        content_standard_name: str = "air_temperature",
+        content_unit: str = "degC",
+        content_size: int = 5,
+        content_value: str = "1",
+    ) -> dict:
+        feature = self.to_geojson()
 
-        Starts from self.to_geojson() and amends:
-        - links: [{ "href": <href>, "rel": "canonical" }]
-        - version: <version>
-        - content: {
-            "encoding": <content_encoding>,
-            "standard_name": <content_standard_name>,
-            "unit": <content_unit>,
-            "size": <content_size>,
-            "value": <content_value>
-            }
-        """
-        feature = self.to_geojson()  # may raise if geospatial_* are missing
+        # Convert Point coords: [lon, lat] -> {"lon": lon, "lat": lat}
+        geom = feature.get("geometry")
+        if isinstance(geom, dict) and geom.get("type") == "Point":
+            coords = geom.get("coordinates")
+            if isinstance(coords, (list, tuple)) and len(coords) >= 2:
+                lat, lon = coords[0], coords[1]
+                try:
+                    lon = float(lon); lat = float(lat)
+                except (TypeError, ValueError):
+                    pass
+                geom["coordinates"] = {"lat": lat, "lon": lon}
 
-        feature["links"] = [
-            {
-                "href": "dummy",
-                "rel": "canonical",
-            }
-        ]
-        feature["version"] = "v04"
-        feature["content"] = {
-            "encoding": "utf-8",
-            "standard_name": "dummy",
-            "unit": "dummy",
-            "size": 5,
-            "value": "dummy",
+        feature["properties"]["content"] = {
+            "encoding": content_encoding,
+            "standard_name": content_standard_name,
+            "unit": content_unit,
+            "size": content_size,
+            "value": content_value,
         }
+        feature["properties"] |= {
+            "datetime": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "function": "sum",
+            "period": "PT1M",
+            "level": "1",
+        }
+        
+        feature["links"] = [{"href": href, "rel": "canonical"}]
+        feature["version"] = version
         return feature
 
-    
+
     def export(self, path: Path, fmt: str = "json") -> Path:
         """Export the ACDD record to JSON, YAML, or GeoJSON file."""
         path = Path(path)
         content = {
-            "json": self.to_json,
-            "yaml": self.to_yaml,
+            "json": self.to_json,                                    # unchanged
+            "yaml": self.to_yaml,                                    # unchanged
             "geojson": lambda: json.dumps(self.to_geojson(), indent=2),
-            "oasis": lambda: json.dumps(self.to_oasis(), indent=2)
+            # OASIS: minified, no newlines, no spaces around commas/colons
+            "oasis":  lambda: json.dumps(self.to_oasis(),
+                                        ensure_ascii=False,
+                                        separators=(",", ":")),
         }
         ext = {"json": ".json", "yaml": ".yaml", "geojson": ".geojson", "oasis": ".json"}[fmt]
         output_path = path.with_suffix(ext)
-        output_path.write_text(content[fmt]())
+        output_path.write_text(content[fmt](), encoding="utf-8")
         return output_path
+
 
     def export_bundle(self, bundle_path: Path) -> Path:
         """Export all supported formats to a ZIP bundle."""

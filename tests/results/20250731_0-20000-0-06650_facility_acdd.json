@@ -23,7 +23,7 @@
   "geospatial_vertical_units": "EPSG:4979",
   "time_coverage_start": "1864-01-01Z",
   "time_coverage_duration": "[TODO]",
-  "creator_type": "[TODO]",
+  "creator_type": "institution",
   "publisher_type": "institution",
   "publisher_institution": "World Meteorological Organization WMO and Federal Office for Meteorology and Climatology MeteoSwiss",
   "program": "WMO Integrated Global Observing System WIGOS",
