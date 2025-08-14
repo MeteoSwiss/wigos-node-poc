@@ -139,15 +139,50 @@ class ACDD:
         else:
             raise ValueError("Missing lat/lon bounds for GeoJSON export")
 
+    def to_oasis(self) -> dict:
+        """
+        Convert an ACDD record to an OASIS-style Feature.
+
+        Starts from self.to_geojson() and amends:
+        - links: [{ "href": <href>, "rel": "canonical" }]
+        - version: <version>
+        - content: {
+            "encoding": <content_encoding>,
+            "standard_name": <content_standard_name>,
+            "unit": <content_unit>,
+            "size": <content_size>,
+            "value": <content_value>
+            }
+        """
+        feature = self.to_geojson()  # may raise if geospatial_* are missing
+
+        feature["links"] = [
+            {
+                "href": "dummy",
+                "rel": "canonical",
+            }
+        ]
+        feature["version"] = "v04"
+        feature["content"] = {
+            "encoding": "utf-8",
+            "standard_name": "dummy",
+            "unit": "dummy",
+            "size": 5,
+            "value": "dummy",
+        }
+        return feature
+
+    
     def export(self, path: Path, fmt: str = "json") -> Path:
         """Export the ACDD record to JSON, YAML, or GeoJSON file."""
         path = Path(path)
         content = {
             "json": self.to_json,
             "yaml": self.to_yaml,
-            "geojson": lambda: json.dumps(self.to_geojson(), indent=2)
+            "geojson": lambda: json.dumps(self.to_geojson(), indent=2),
+            "oasis": lambda: json.dumps(self.to_oasis(), indent=2)
         }
-        ext = {"json": ".json", "yaml": ".yaml", "geojson": ".geojson"}[fmt]
+        ext = {"json": ".json", "yaml": ".yaml", "geojson": ".geojson", "oasis": ".json"}[fmt]
         output_path = path.with_suffix(ext)
         output_path.write_text(content[fmt]())
         return output_path

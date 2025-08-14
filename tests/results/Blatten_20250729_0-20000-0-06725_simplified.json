@@ -26,9 +26,7 @@
       }
     ],
     "onlineResource": {
-      "linkage": {
-        "url": "https://www.meteoschweiz.admin.ch/home/messwerte.html?param=messnetz-automatisch&station=BLA"
-      }
+      "url": "https://www.meteoschweiz.admin.ch/home/messwerte.html?param=messnetz-automatisch&station=BLA"
     },
     "description": {
       "description": "Bla...bla...bla...",
@@ -2830,9 +2828,7 @@
             ]
           },
           "onlineResource": {
-            "linkage": {
-              "url": "https://oscar.wmo.int/surface"
-            }
+            "url": "https://oscar.wmo.int/surface"
           }
         },
         "role": "http://www.isotc211.org/2005/resources/Codelist/gmxCodelists.xml#CI_RoleCode"

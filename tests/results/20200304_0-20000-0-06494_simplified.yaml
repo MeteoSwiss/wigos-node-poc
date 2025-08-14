@@ -892,6 +892,5 @@ header:
           - oscar@wmo.int
           - https://oscar.wmo.int/surface/#/feedback
         onlineResource:
-          linkage:
-            url: https://oscar.wmo.int/surface
+          url: https://oscar.wmo.int/surface
       role: http://www.isotc211.org/2005/resources/Codelist/gmxCodelists.xml#CI_RoleCode

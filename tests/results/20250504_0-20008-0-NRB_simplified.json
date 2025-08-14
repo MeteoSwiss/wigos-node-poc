@@ -162,9 +162,7 @@
       "endPosition": null
     },
     "onlineResource": {
-      "linkage": {
-        "url": "http://www.meteo.go.ke/obsv/ozone.html"
-      }
+      "url": "http://www.meteo.go.ke/obsv/ozone.html"
     },
     "description": {
       "description": "The  station is located at 01\u00b0 18'S  36\u00b0 45' E at an altitude of 1795m and is within the compound of the Kenya Meteorological Department headquarters at Dagoretti Corner, Nairobi.",
@@ -424,38 +422,28 @@
               "onLine": [
                 {
                   "@id": "id_e9184075-8fc1-3237-e053-148ef98d6314",
-                  "linkage": {
-                    "url": "https://woudc.org/archive/Archive-NewFormat/TotalOzone_1.0_1/stn175/dobson/1984/19840801.Dobson.Beck.018.U_Nairobi.csv"
-                  },
-                  "description": "Archive"
+                  "description": "Archive",
+                  "url": "https://woudc.org/archive/Archive-NewFormat/TotalOzone_1.0_1/stn175/dobson/1984/19840801.Dobson.Beck.018.U_Nairobi.csv"
                 },
                 {
                   "@id": "id_e9184075-8fc0-3237-e053-148ef98d6314",
-                  "linkage": {
-                    "url": "https://woudc.org/archive/Archive-NewFormat/TotalOzone_1.0_1/stn175/dobson/1984/19840701.Dobson.Beck.018.U_Nairobi.csv"
-                  },
-                  "description": "Archive"
+                  "description": "Archive",
+                  "url": "https://woudc.org/archive/Archive-NewFormat/TotalOzone_1.0_1/stn175/dobson/1984/19840701.Dobson.Beck.018.U_Nairobi.csv"
                 },
                 {
                   "@id": "id_e9184075-8fbf-3237-e053-148ef98d6314",
-                  "linkage": {
-                    "url": "https://woudc.org/archive/Archive-NewFormat/TotalOzone_1.0_1/stn175/dobson/1984/19840601.Dobson.Beck.018.U_Nairobi.csv"
-                  },
-                  "description": "Archive"
+                  "description": "Archive",
+                  "url": "https://woudc.org/archive/Archive-NewFormat/TotalOzone_1.0_1/stn175/dobson/1984/19840601.Dobson.Beck.018.U_Nairobi.csv"
                 },
                 {
                   "@id": "id_e9184075-8fbe-3237-e053-148ef98d6314",
-                  "linkage": {
-                    "url": "https://woudc.org/archive/Archive-NewFormat/TotalOzone_1.0_1/stn175/dobson/1984/19840501.Dobson.Beck.018.U_Nairobi.csv"
-                  },
-                  "description": "Archive"
+                  "description": "Archive",
+                  "url": "https://woudc.org/archive/Archive-NewFormat/TotalOzone_1.0_1/stn175/dobson/1984/19840501.Dobson.Beck.018.U_Nairobi.csv"
                 },
                 {
                   "@id": "id_e9184075-8fbd-3237-e053-148ef98d6314",
-                  "linkage": {
-                    "url": "https://woudc.org/archive/Archive-NewFormat/TotalOzone_1.0_1/stn175/dobson/1984/19840401.Dobson.Beck.018.U_Nairobi.csv"
-                  },
-                  "description": "Archive"
+                  "description": "Archive",
+                  "url": "https://woudc.org/archive/Archive-NewFormat/TotalOzone_1.0_1/stn175/dobson/1984/19840401.Dobson.Beck.018.U_Nairobi.csv"
                 }
               ]
             }
@@ -549,10 +537,8 @@
             "transferOptions": {
               "onLine": {
                 "@id": "id_e9184075-5f96-3237-e053-148ef98d6314",
-                "linkage": {
-                  "url": "http://woudc.org/archive/Archive-NewFormat/OzoneSonde_1.0_1/stn175/ecc"
-                },
-                "description": "Archive"
+                "description": "Archive",
+                "url": "http://woudc.org/archive/Archive-NewFormat/OzoneSonde_1.0_1/stn175/ecc"
               }
             }
           }
@@ -644,10 +630,8 @@
             "transferOptions": {
               "onLine": {
                 "@id": "id_e9184075-5f97-3237-e053-148ef98d6314",
-                "linkage": {
-                  "url": "http://woudc.org/archive/Archive-NewFormat/OzoneSonde_1.0_1/stn175/ecc"
-                },
-                "description": "Archive"
+                "description": "Archive",
+                "url": "http://woudc.org/archive/Archive-NewFormat/OzoneSonde_1.0_1/stn175/ecc"
               }
             }
           }
@@ -739,10 +723,8 @@
             "transferOptions": {
               "onLine": {
                 "@id": "id_e9184075-5f98-3237-e053-148ef98d6314",
-                "linkage": {
-                  "url": "http://woudc.org/archive/Archive-NewFormat/OzoneSonde_1.0_1/stn175/ecc"
-                },
-                "description": "Archive"
+                "description": "Archive",
+                "url": "http://woudc.org/archive/Archive-NewFormat/OzoneSonde_1.0_1/stn175/ecc"
               }
             }
           }
@@ -924,10 +906,8 @@
             "transferOptions": {
               "onLine": {
                 "@id": "id_e9184075-64fe-3237-e053-148ef98d6314",
-                "linkage": {
-                  "url": "https://aeronet.gsfc.nasa.gov/cgi-bin/data_display_aod_v3?site=Nairobi&nachal=2&level=1"
-                },
-                "description": "Archive"
+                "description": "Archive",
+                "url": "https://aeronet.gsfc.nasa.gov/cgi-bin/data_display_aod_v3?site=Nairobi&nachal=2&level=1"
               }
             }
           }
@@ -1126,10 +1106,8 @@
             "transferOptions": {
               "onLine": {
                 "@id": "id_e9184075-5f99-3237-e053-148ef98d6314",
-                "linkage": {
-                  "url": "http://wrdc.mgo.rssi.ru"
-                },
-                "description": "Archive"
+                "description": "Archive",
+                "url": "http://wrdc.mgo.rssi.ru"
               }
             }
           }
@@ -1207,9 +1185,7 @@
             ]
           },
           "onlineResource": {
-            "linkage": {
-              "url": "https://oscar.wmo.int/surface"
-            }
+            "url": "https://oscar.wmo.int/surface"
           }
         },
         "role": "http://www.isotc211.org/2005/resources/Codelist/gmxCodelists.xml#CI_RoleCode"

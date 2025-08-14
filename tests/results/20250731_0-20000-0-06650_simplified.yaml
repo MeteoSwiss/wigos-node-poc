@@ -18,8 +18,7 @@ facility:
     beginPosition: '1864-01-01T00:00:00Z'
     endPosition: null
   onlineResource:
-    linkage:
-      url: https://www.meteoschweiz.admin.ch/home/messwerte.html?param=messnetz-automatisch&station=LUZ
+    url: https://www.meteoschweiz.admin.ch/home/messwerte.html?param=messnetz-automatisch&station=LUZ
   facilityType: http://codes.wmo.int/wmdr/FacilityType/landFixed
   dateEstablished: 1864-01-01Z
   wmoRegion: http://codes.wmo.int/wmdr/WMORegion/europe
@@ -922,6 +921,5 @@ header:
           - oscar@wmo.int
           - https://oscar.wmo.int/surface/#/feedback
         onlineResource:
-          linkage:
-            url: https://oscar.wmo.int/surface
+          url: https://oscar.wmo.int/surface
       role: http://www.isotc211.org/2005/resources/Codelist/gmxCodelists.xml#CI_RoleCode

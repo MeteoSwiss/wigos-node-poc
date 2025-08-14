@@ -19,8 +19,7 @@ facility:
     beginPosition: '2000-08-17T00:00:00Z'
     endPosition: null
   onlineResource:
-    linkage:
-      url: https://www.meteoschweiz.admin.ch/home/messwerte.html?param=messnetz-automatisch&station=BLA
+    url: https://www.meteoschweiz.admin.ch/home/messwerte.html?param=messnetz-automatisch&station=BLA
   description:
     description: Bla...bla...bla...
     '@gml:id': id_95a65e08-1b4f-4e78-b73d-99566227b820
@@ -2073,6 +2072,5 @@ header:
           - oscar@wmo.int
           - https://oscar.wmo.int/surface/#/feedback
         onlineResource:
-          linkage:
-            url: https://oscar.wmo.int/surface
+          url: https://oscar.wmo.int/surface
       role: http://www.isotc211.org/2005/resources/Codelist/gmxCodelists.xml#CI_RoleCode

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from collections import defaultdict
+# from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -14,143 +14,6 @@ import yaml
 
 from acdd.acdd import ACDD
 from utils.utils import load_mapping_csv
-
-
-@dataclass
-class WMDR20:
-    """
-    WMDR 2.0 metadata wrapper to manage ACDD-based records with hierarchical structure.
-
-    - `record`: an ACDD-compliant metadata record
-    - `parent_id`: reference to parent metadata record
-    - `children`: list of subordinate records or file paths
-    """
-    record: ACDD
-    parent_id: Optional[str] = None
-    children: List[Union[str, 'WMDR20']] = field(default_factory=list)
-
-    def add_child(self, child: Union[str, 'WMDR20']) -> None:
-        """Attach a subordinate record or reference."""
-        self.children.append(child)
-
-    def set_parent(self, parent_id: str) -> None:
-        """Link to a parent record by ID or path."""
-        self.parent_id = parent_id
-
-    def to_dict(self) -> dict:
-        """Convert to nested dictionary representation."""
-        return {
-            "record": self.record.to_dict(),
-            "parent_id": self.parent_id,
-            "children": [
-                c if isinstance(c, str) else c.to_dict() for c in self.children
-            ]
-        }
-
-    def to_json(self) -> str:
-        """Export full hierarchy as JSON string."""
-        return json.dumps(self.to_dict(), indent=2)
-
-    def to_yaml(self) -> str:
-        """Export full hierarchy as YAML string."""
-        return yaml.dump(self.to_dict(), sort_keys=False)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> 'WMDR20':
-        """Reconstruct hierarchy from dictionary."""
-        children = d.get("children", [])
-        parsed_children = [
-            c if isinstance(c, str) else WMDR20.from_dict(c)
-            for c in children
-        ]
-        return cls(
-            record=ACDD.from_dict(d["record"]),
-            parent_id=d.get("parent_id"),
-            children=parsed_children
-        )
-
-    @classmethod
-    def from_json_file(cls, path: str) -> 'WMDR20':
-        """Load a WMDR20 record from a JSON file."""
-        with open(path) as f:
-            d = json.load(f)
-        return cls.from_dict(d)
-
-    @classmethod
-    def from_yaml_file(cls, path: str) -> 'WMDR20':
-        """Load a WMDR20 record from a YAML file."""
-        with open(path) as f:
-            d = yaml.safe_load(f)
-        return cls.from_dict(d)
-
-    @staticmethod
-    def parse_wmdr10_xml(xml_path: Union[str, Path]) -> dict:
-        """
-        Parse a WMDR 1.0 XML file into a dictionary using xmltodict.
-
-        Args:
-            xml_path (Union[str, Path]): Path to the WMDR XML file.
-
-        Returns:
-            dict: Parsed WMDR XML content.
-        """
-        with open(xml_path, "rb") as f:
-            parsed = xmltodict.parse(f, process_namespaces=True)
-        return parsed
-
-    @staticmethod
-    def strip_ns_keys(d: dict) -> dict:
-        """
-        Recursively remove XML namespaces from dictionary keys.
-
-        Args:
-            d (dict): Input dictionary.
-
-        Returns:
-            dict: Dictionary with stripped keys.
-        """
-        if isinstance(d, dict):
-            return {k.split(":")[-1]: WMDR20.strip_ns_keys(v) for k, v in d.items()}
-        elif isinstance(d, list):
-            return [WMDR20.strip_ns_keys(i) for i in d]
-        else:
-            return d
-
-    @classmethod
-    def from_wmdr10(cls, xml_path: Union[str, Path]) -> 'WMDR20':
-        """
-        Convert WMDR 1.0 XML to WMDR20 instance with ACDD record.
-
-        Args:
-            xml_path (Union[str, Path]): Path to the WMDR 1.0 XML file.
-
-        Returns:
-            WMDR20: WMDR20 instance containing mapped ACDD metadata.
-        """
-        raw_data = cls.parse_wmdr10_xml(xml_path)
-        data = cls.strip_ns_keys(raw_data)
-        rec = data.get("WIGOSMetadataRecord", {})
-        facility = rec.get("facility", {})
-
-        acdd_attrs = {
-            "title": facility.get("name"),
-            "summary": facility.get("description"),
-            "geospatial_lat_min": facility.get("geoLocation", {}).get("latitude"),
-            "geospatial_lat_max": facility.get("geoLocation", {}).get("latitude"),
-            "geospatial_lon_min": facility.get("geoLocation", {}).get("longitude"),
-            "geospatial_lon_max": facility.get("geoLocation", {}).get("longitude"),
-        }
-
-        # Remove None values and warn
-        acdd_clean = {}
-        for k, v in acdd_attrs.items():
-            if v is not None:
-                acdd_clean[k] = v
-            else:
-                warnings.warn(f"Missing value for '{k}' in WMDR10 -> ACDD mapping")
-
-        acdd = ACDD.from_dict(acdd_clean)
-        return cls(record=acdd)
 
 
 class WMDR10:
@@ -194,6 +57,66 @@ class WMDR10:
 
         if simplify:
             self._simplify()
+
+    @staticmethod
+    def _normalize_key(name: str) -> str:
+        if not isinstance(name, str):
+            return str(name)
+        s = name.strip()
+        # remove namespace (prefix:local → local)
+        if ":" in s:
+            s = s.split(":", 1)[1]
+        # drop leading attribute/text sigils
+        if s.startswith("@") or s.startswith("#"):
+            s = s[1:]
+        return s.lower()
+
+    @staticmethod
+    def _select_latest_description(val):
+        from datetime import datetime
+        def _parse_iso(ts):
+            if not ts or not isinstance(ts, str):
+                return None
+            try:
+                return datetime.fromisoformat(ts.replace('Z', '+00:00'))
+            except Exception:
+                return None
+
+        def _desc(x):
+            if isinstance(x, dict):
+                return x.get('description') or x.get('Description') or x.get('#text')
+            return x if isinstance(x, str) else None
+
+        def _begin(x):
+            if isinstance(x, dict):
+                vp = x.get('validPeriod')
+                if isinstance(vp, dict):
+                    return _parse_iso(vp.get('beginPosition') or vp.get('begin'))
+                # sometimes beginPosition lives on the same dict
+                return _parse_iso(x.get('beginPosition'))
+            return None
+
+        if isinstance(val, list):
+            best = None
+            best_dt = None
+            for el in val:
+                d = _desc(el)
+                if d is None:
+                    continue
+                dt = _begin(el)
+                if best_dt is None or (dt is not None and dt > best_dt):
+                    best_dt, best = dt, d
+            if best is not None:
+                return best
+            # fallback: first stringy description in the list
+            for el in val:
+                d = _desc(el)
+                if d:
+                    return d
+            return None
+
+        return _desc(val)
+
 
     def _simplify(self) -> None:
         """
@@ -507,35 +430,57 @@ class WMDR10:
             return v
 
         def simplify_atomic_at(parent, key, val):
-            """Atomic simplifications. May MERGE/HOIST into parent (validPeriod, linkage)."""
+            """
+            Atomic, local normalizations. May MERGE/HOIST into parent.
+            - @xsi:nil → None
+            - @xlink:href → scalar
+            - ('@codeSpace', '#text') → '#text'
+            - drop '@codeListValue' (keep '@codeList')
+            - CharacterString → scalar
+            - pos → scalar
+            - geoLocation: {'Point': '...'} or {'Point': {'pos':'...'}} or {'pos':'...'} → scalar
+            - **linkage.url/URL → parent['url']; drop 'linkage' or 'onlineResource'**
+            - validPeriod: merge TimePeriod fields into parent (keep None values)
+            """
             v = val
             if isinstance(v, dict):
                 # nil → None
                 if v.get('@xsi:nil') == 'true':
                     return None
+
                 # inline xlink href
                 if '@xlink:href' in v:
                     return v['@xlink:href']
+
                 # codeSpace/#text → value
                 if '@codeSpace' in v and '#text' in v:
                     return v['#text']
+
                 # drop @codeListValue; keep @codeList if present
                 if '@codeListValue' in v:
                     v = {kk: vv for kk, vv in v.items() if kk != '@codeListValue'}
                     if set(v.keys()) == {'@codeList'}:
                         return v['@codeList']
+
                 # pos → value
                 if list(v.keys()) == ['pos']:
                     return v['pos']
+
                 # CharacterString → value
                 if list(v.keys()) == ['CharacterString']:
                     return v['CharacterString']
-                # linkage.URL → {'url': URL}
-                if key == 'linkage' and list(v.keys()) == ['URL']:
-                    return {'url': v['URL']}
-                # geoLocation variants → string
+
+                # geoLocation: {'Point': '...'} / {'Point': {'pos':'...'}} / {'pos': '...'} → '...'
                 if keynorm(key) == 'geolocation':
-                    return _extract_geolocation_value(v)
+                    if 'Point' in v:
+                        p = v['Point']
+                        if isinstance(p, dict) and 'pos' in p:
+                            return p['pos']
+                        return p
+                    if 'pos' in v:
+                        return v['pos']
+
+                # --- Unified linkage handling ---
                 # Hoist onlineResource.linkage.url → parent['url']
                 if keynorm(key) in ('onlineresource', 'onlineresources'):
                     link = v.get('linkage')
@@ -546,18 +491,80 @@ class WMDR10:
                         if 'URL' in link:
                             parent['url'] = link['URL']
                             return '__DROPPED__'
-                # Hoist plain linkage.url → parent['url']
-                if keynorm(key) == 'linkage' and ('url' in v or 'URL' in v):
-                    parent['url'] = v.get('url', v.get('URL'))
-                    return '__DROPPED__'
+
+                # Hoist linkage.url/URL → parent['url']
+                if keynorm(key) == 'linkage':
+                    if 'url' in v:
+                        parent['url'] = v['url']
+                        return '__DROPPED__'
+                    if 'URL' in v:
+                        parent['url'] = v['URL']
+                        return '__DROPPED__'
+
                 # validPeriod: MERGE fields into parent; KEEP None values
                 if key.lower() == 'validperiod':
                     inner = v.get('TimePeriod', v)
                     if isinstance(inner, dict):
                         parent.pop(key, None)
-                        merge_into(parent, inner)
+                        for kk, vv in inner.items():
+                            parent[kk] = vv
                         return '__DROPPED__'
+
             return v
+
+
+        # def simplify_atomic_at(parent, key, val):
+        #     """Atomic simplifications. May MERGE/HOIST into parent (validPeriod, linkage)."""
+        #     v = val
+        #     if isinstance(v, dict):
+        #         # nil → None
+        #         if v.get('@xsi:nil') == 'true':
+        #             return None
+        #         # inline xlink href
+        #         if '@xlink:href' in v:
+        #             return v['@xlink:href']
+        #         # codeSpace/#text → value
+        #         if '@codeSpace' in v and '#text' in v:
+        #             return v['#text']
+        #         # drop @codeListValue; keep @codeList if present
+        #         if '@codeListValue' in v:
+        #             v = {kk: vv for kk, vv in v.items() if kk != '@codeListValue'}
+        #             if set(v.keys()) == {'@codeList'}:
+        #                 return v['@codeList']
+        #         # pos → value
+        #         if list(v.keys()) == ['pos']:
+        #             return v['pos']
+        #         # CharacterString → value
+        #         if list(v.keys()) == ['CharacterString']:
+        #             return v['CharacterString']
+        #         # linkage.URL → {'url': URL}
+        #         if key == 'linkage' and list(v.keys()) == ['URL']:
+        #             return {'url': v['URL']}
+        #         # geoLocation variants → string
+        #         if keynorm(key) == 'geolocation':
+        #             return _extract_geolocation_value(v)
+        #         # Hoist onlineResource.linkage.url → parent['url']
+        #         if keynorm(key) in ('onlineresource', 'onlineresources'):
+        #             link = v.get('linkage')
+        #             if isinstance(link, dict):
+        #                 if 'url' in link:
+        #                     parent['url'] = link['url']
+        #                     return '__DROPPED__'
+        #                 if 'URL' in link:
+        #                     parent['url'] = link['URL']
+        #                     return '__DROPPED__'
+        #         # Hoist plain linkage.url → parent['url']
+        #         if keynorm(key) == 'linkage' and ('url' in v or 'URL' in v):
+        #             parent['url'] = v.get('url', v.get('URL'))
+        #             return '__DROPPED__'
+        #         # validPeriod: MERGE fields into parent; KEEP None values
+        #         if key.lower() == 'validperiod':
+        #             inner = v.get('TimePeriod', v)
+        #             if isinstance(inner, dict):
+        #                 parent.pop(key, None)
+        #                 merge_into(parent, inner)
+        #                 return '__DROPPED__'
+        #     return v
 
         def atomic_pass(d):
             """Apply atomic simplifications recursively."""
@@ -848,54 +855,52 @@ class WMDR10:
 
 
     def facility_to_acdd(self, mapping_file: Path | str) -> ACDD:
-        """
-        Convert the ObservingFacility section of the simplified WMDR10 structure to an ACDD-compliant record.
-
-        Args:
-            mapping_file (Path | str): Path to the mapping CSV file.
-
-        Returns:
-            ACDD: ACDD-compliant metadata object.
-        """
         mappings = load_mapping_csv(mapping_file)
 
         result: dict[str, Any] = {}
-        keywords: list[dict[str, Any]] = []
+        collected_keyword_entries: list[Any] = []
+        collected_projects: list[Any] = []   # <-- collect raw project inputs here
 
         for row in mappings:
-            attr = row["acdd_attribute"]
-            default = row.get("default", "").strip() or None
+            attr   = row['acdd_attribute']
+            path   = (row.get('wmdr10_simplified_path') or '').strip()
+            default = (row.get('default') or '').strip() or None
 
-            # Handle keyword attributes
-            if attr == "keywords":
-                values = []
-                if row["wmdr10_simplified_path"]:
-                    value = self._create_json_stub(self.data, row)
-                    if value:
-                        values.extend(value if isinstance(value, list) else [value])
+            if attr == 'keywords':
+                v = self._create_json_stub(self.data, row) if path else None
+                if v is not None:
+                    collected_keyword_entries.append(v)
                 if default:
                     try:
-                        values.append(json.loads(default))
+                        collected_keyword_entries.append(json.loads(default))
                     except Exception:
-                        values.append(default)
-                keywords.extend(values)
+                        collected_keyword_entries.append(default)
 
-            # Handle geospatial attributes
-            elif attr.startswith("geospatial_"):
-                if row["wmdr10_simplified_path"]:
-                    geo = self._create_geospatial_attributes(row)
-                    if geo:
-                        result.update(geo)
-                if default:
+            elif attr == 'project':
+                # just collect; do NOT assign raw JSON to result['project'] here
+                v = self._create_json_stub(self.data, row) if path else None
+                if v is not None:
+                    collected_projects.append(v)
+
+            elif attr.startswith('geospatial_'):
+                geo = self._create_geospatial_attributes(row) if path else {}
+                if geo:
+                    result.update(geo)
+                if default and attr not in result:
                     result[attr] = default
 
-            # Handle regular attributes
+            elif attr == 'summary':
+                val = self._resolve_path_recursive(self.data, path.split('/')) if path else None
+                result_summary = self._select_latest_description(val) or default
+                if result_summary is not None:
+                    result['summary'] = result_summary
+
             else:
-                values = []
-                if row["wmdr10_simplified_path"]:
-                    value = self._create_json_stub(self.data, row)
-                    if value is not None:
-                        values.append(value)
+                values: list[Any] = []
+                if path:
+                    v = self._create_json_stub(self.data, row)
+                    if v is not None:
+                        values.append(v)
                 if default:
                     values.append(default)
                 if values:
@@ -906,84 +911,579 @@ class WMDR10:
                     else:
                         result[attr] = values if len(values) > 1 else values[0]
 
-        # Promote selected keyword values to ACDD attributes
-        result['project'] = [ele for ele in keywords if 'programAffiliation' in ele]
+        # --- projects: compute from collected entries; fallback to facility.programAffiliation ---
+        uris = self._project_uris_from(collected_projects)
+        if not uris:
+            # robust fallback if mapping doesn't provide data
+            pa = self._resolve_path_recursive(self.data, ["facility", "programAffiliation"])
+            uris = self._project_uris_from([pa] if pa is not None else [])
+        if uris:
+            # store as a LIST OF STRINGS, e.g. [".../GBON", ".../GOSGeneral"]
+            result['project'] = json.dumps(uris)
 
-        # Store remaining keywords as list of JSON stubs
-        # result["keywords"] = str([ele for ele in keywords if 'programAffiliation' not in ele])
-        result["keywords"] = ",".join([str(ele) for ele in keywords if 'programAffiliation' not in ele])
+        # --- keywords: each mapping-row result becomes one JSON blob string; join with commas ---
+        result['keywords'] = self._acdd_keywords_as_jsonarray_string(collected_keyword_entries)
 
         return ACDD(result)
+
+
+    # def facility_to_acdd(self, mapping_file: Path | str) -> ACDD:
+    #     """
+    #     Build an ACDD record from the *facility* part of the simplified WMDR10 JSON.
+
+    #     Changes:
+    #     - 'projects' mapping row triggers computing ACDD 'project'
+    #     - 'keywords' mapping rows are collected and serialized as requested
+    #     """
+    #     mappings = load_mapping_csv(mapping_file)
+
+    #     result: dict[str, Any] = {}
+
+    #     # --- pass 1: handle everything except keywords/projects ---
+    #     collected_keyword_entries: list[Any] = []
+    #     need_projects: bool = False
+
+    #     for row in mappings:
+    #         attr   = row['acdd_attribute']
+    #         path   = (row.get('wmdr10_simplified_path') or '').strip()
+    #         default = (row.get('default') or '').strip() or None
+
+    #         if attr == 'keywords':
+    #             # collect; we'll serialize once at the end
+    #             v = self._create_json_stub(self.data, row) if path else None
+    #             if v is not None:
+    #                 collected_keyword_entries.append(v)
+    #             if default:
+    #                 try:
+    #                     collected_keyword_entries.append(json.loads(default))
+    #                 except Exception:
+    #                     collected_keyword_entries.append(default)
+
+    #         elif attr == 'projects':
+    #             # just remember we must compute 'project' near the end
+    #             need_projects = True
+
+    #         elif attr.startswith('geospatial_'):
+    #             geo = self._create_geospatial_attributes(row) if path else {}
+    #             if geo:
+    #                 result.update(geo)
+    #             if default and attr not in result:
+    #                 result[attr] = default
+
+    #         elif attr == 'summary':
+    #             # latest description by beginPosition (if the path points at a list)
+    #             val = self._resolve_path_recursive(self.data, path.split('/')) if path else None
+    #             summary = self._select_latest_description(val)
+    #             if summary is None:
+    #                 summary = default
+    #             if summary is not None:
+    #                 result['summary'] = summary
+
+    #         else:
+    #             values: list[Any] = []
+    #             if path:
+    #                 v = self._create_json_stub(self.data, row)
+    #                 if v is not None:
+    #                     values.append(v)
+    #             if default:
+    #                 values.append(default)
+    #             if values:
+    #                 if attr in result:
+    #                     if not isinstance(result[attr], list):
+    #                         result[attr] = [result[attr]]
+    #                     result[attr].extend(values)
+    #                 else:
+    #                     result[attr] = values if len(values) > 1 else values[0]
+
+    #     # --- pass 2: compute 'project' if requested ---
+    #     if need_projects:
+    #         project_str = self._acdd_compute_projects_string()
+    #         if project_str:
+    #             result['project'] = project_str
+
+    #     # --- pass 3: serialize keywords -> each mapping-row result becomes ONE JSON blob string; join with ", "
+    #     result['keywords'] = self._acdd_keywords_as_string(collected_keyword_entries)
+
+    #     return ACDD(result)
+
+    def _project_uris_from(self, entries: list[Any]) -> list[str]:
+        """Extract current programAffiliation URIs from collected entries."""
+        # flatten to blocks
+        blocks: list[Any] = []
+        def push(x):
+            if x is None:
+                return
+            if isinstance(x, list):
+                for el in x: push(el)
+            elif isinstance(x, dict) and len(x) == 1:
+                # unwrap single-key wrapper like {"programAffiliation": [...]}
+                (_, v), = x.items()
+                push(v)
+            else:
+                blocks.append(x)
+        for e in entries: push(e)
+
+        def is_current(node) -> bool:
+            if isinstance(node, str):
+                return True
+            if not isinstance(node, dict):
+                return False
+            # ended at block level?
+            if node.get('endPosition') not in (None, '', {}):
+                return False
+            rs = node.get('reportingStatus')
+            if rs is None:
+                return True
+            rs_list = rs if isinstance(rs, list) else [rs]
+            for r in rs_list:
+                if not isinstance(r, dict):
+                    continue
+                # direct endPosition or legacy validPeriod.endPosition
+                if r.get('endPosition') in (None, '', {}):
+                    return True
+                vp = r.get('validPeriod')
+                if isinstance(vp, dict) and vp.get('endPosition') in (None, '', {}):
+                    return True
+            return False
+
+        def to_uri(node) -> str | None:
+            if isinstance(node, str):
+                return node
+            if isinstance(node, dict):
+                uri = node.get('programAffiliation')
+                return uri if isinstance(uri, str) else None
+            return None
+
+        seen, uris = set(), []
+        for blk in blocks:
+            if not is_current(blk):
+                continue
+            uri = to_uri(blk)
+            if uri and uri not in seen:
+                seen.add(uri)
+                uris.append(uri)
+        return uris
+
+
+    def _acdd_compute_projects_string(self) -> str:
+        # Pull all programAffiliation blocks directly from facility
+        pa = self._resolve_path_recursive(self.data, ["facility", "programAffiliation"])
+        blocks = pa if isinstance(pa, list) else ([pa] if pa is not None else [])
+
+        def is_current(node) -> bool:
+            if isinstance(node, str):
+                return True
+            if not isinstance(node, dict):
+                return False
+            # ended?
+            if node.get('endPosition') not in (None, '', {}):
+                return False
+            rs = node.get('reportingStatus')
+            if rs is None:
+                return True
+            rs_list = rs if isinstance(rs, list) else [rs]
+            for r in rs_list:
+                if isinstance(r, dict):
+                    vp = r.get('validPeriod')
+                    if isinstance(vp, dict) and vp.get('endPosition') in (None, '', {}):
+                        return True
+            return False
+
+        def to_uri(node) -> str | None:
+            if isinstance(node, str):
+                return node
+            if isinstance(node, dict) and isinstance(node.get('programAffiliation'), str):
+                return node['programAffiliation']
+            return None
+
+        seen = set()
+        uris: list[str] = []
+        for blk in blocks:
+            if not is_current(blk):
+                continue
+            uri = to_uri(blk)
+            if uri and uri not in seen:
+                seen.add(uri)
+                uris.append(uri)
+
+        return ", ".join(uris) if uris else ""
+
+
+    def _acdd_keywords_as_jsonarray_string(self, entries: list[Any]) -> str:
+        """
+        Turn the collected 'keywords' row outputs into a JSON-array string.
+        Each mapping-row result stays as the JSON we produced (dict/list/scalar).
+        We de-duplicate while preserving order, using structural equality.
+        """
+        def _norm(x: Any) -> Any:
+            # Keep native dict/list/str/etc.; do NOT stringify here
+            return x
+
+        # de-dupe by structural JSON representation
+        seen: set[str] = set()
+        uniq: list[Any] = []
+        for e in entries:
+            n = _norm(e)
+            sig = json.dumps(n, sort_keys=True, separators=(",", ":"))
+            if sig not in seen:
+                seen.add(sig)
+                uniq.append(n)
+
+        # return as a JSON string of an array
+        return json.dumps(uniq, sort_keys=True, separators=(",", ":"))
+
+
+    def _acdd_keywords_as_string(self, entries: list[Any]) -> str:
+        def to_blob(x) -> str:
+            # Keep JSON structure: dict/list → compact JSON; scalars → str()
+            if isinstance(x, (dict, list)):
+                return json.dumps(x, separators=(",", ":"), sort_keys=True)
+            return str(x)
+
+        # Each mapping row may have returned a wrapper like {<key>: value}
+        blobs: list[str] = []
+        for e in entries:
+            if isinstance(e, dict) and len(e) == 1:
+                # keep the one-key wrapper as-is (it's the JSON you expect)
+                blobs.append(to_blob(e))
+            else:
+                # also accept plain dicts/lists/scalars
+                blobs.append(to_blob(e))
+
+        # dedupe while preserving order
+        seen = set()
+        uniq = []
+        for b in blobs:
+            if b not in seen:
+                seen.add(b)
+                uniq.append(b)
+
+        return ", ".join(uniq)
+
+
+    # def facility_to_acdd(self, mapping_file: Path | str) -> ACDD:
+    #     """
+    #     Build an ACDD record from the *facility* part of the simplified WMDR10 JSON.
+
+    #     Fixes implemented:
+    #     - summary: pick the 'description' associated with the most recent beginPosition
+    #     - project: comma-separated programAffiliation URIs for *current* affiliations only
+    #             (endPosition is None at top level or in any reportingStatus.validPeriod)
+    #     - keywords: include ALL mapping rows with acdd_attribute == 'keywords' (preserve structure)
+    #     """
+    #     mappings = load_mapping_csv(mapping_file)
+
+    #     result: dict[str, Any] = {}
+    #     keywords: list[Any] = []
+
+    #     # Helper: parse ISO time safely
+    #     def _parse_iso(ts: str | None):
+    #         if not ts or not isinstance(ts, str):
+    #             return None
+    #         s = ts.replace('Z', '+00:00')
+    #         try:
+    #             from datetime import datetime
+    #             return datetime.fromisoformat(s)
+    #         except Exception:
+    #             return None
+
+    #     # Helper: choose description by latest beginPosition
+    #     def _select_latest_description(val):
+    #         # val may be str, dict, or list of dict/str
+    #         def _extract_desc(d):
+    #             if isinstance(d, dict):
+    #                 return d.get('description') or d.get('Description') or d.get('#text')
+    #             return d if isinstance(d, str) else None
+
+    #         def _extract_begin(d):
+    #             if isinstance(d, dict):
+    #                 # typical: {"validPeriod": {"beginPosition": ...}}
+    #                 vp = d.get('validPeriod') if isinstance(d.get('validPeriod'), dict) else d
+    #                 if isinstance(vp, dict):
+    #                     return _parse_iso(vp.get('beginPosition') or vp.get('begin') or None)
+    #             return None
+
+    #         if isinstance(val, list):
+    #             best_desc, best_dt = None, None
+    #             for el in val:
+    #                 dt = _extract_begin(el)
+    #                 txt = _extract_desc(el)
+    #                 if txt is None:
+    #                     continue
+    #                 if best_dt is None or (dt is not None and dt > best_dt):
+    #                     best_dt, best_desc = dt, txt
+    #             # Fallback: first text found
+    #             return best_desc if best_desc is not None else next((_extract_desc(x) for x in val if _extract_desc(x)), None)
+    #         # not a list
+    #         return _extract_desc(val)
+
+    #     # Helper: current program affiliation?
+    #     def _is_current_affiliation(node):
+    #         # Accept strings as current (no timing metadata available)
+    #         if isinstance(node, str):
+    #             return True
+    #         if not isinstance(node, dict):
+    #             return False
+    #         # top-level endPosition present and not None -> not current
+    #         if 'endPosition' in node and node.get('endPosition') not in (None, '', {}):
+    #             return False
+    #         # If reportingStatus exists, consider it current iff ANY status has endPosition None
+    #         rs = node.get('reportingStatus')
+    #         if rs is not None:
+    #             rs_list = rs if isinstance(rs, list) else [rs]
+    #             for r in rs_list:
+    #                 if isinstance(r, dict):
+    #                     vp = r.get('validPeriod')
+    #                     if isinstance(vp, dict):
+    #                         if vp.get('endPosition') in (None, '', {}):
+    #                             return True
+    #             # All statuses have an end -> not current
+    #             return False
+    #         # No reportingStatus nor endPosition -> assume current
+    #         return True
+
+    #     # Helper: extract programAffiliation URI
+    #     def _affiliation_uri(node):
+    #         if isinstance(node, str):
+    #             return node
+    #         if isinstance(node, dict):
+    #             uri = node.get('programAffiliation')
+    #             return uri if isinstance(uri, str) else None
+    #         return None
+
+    #     for row in mappings:
+    #         attr = row['acdd_attribute']
+    #         default = (row.get('default') or '').strip() or None
+    #         path = (row.get('wmdr10_simplified_path') or '').strip()
+
+    #         if attr == 'summary':
+    #             # Prefer data over default
+    #             val = self._resolve_path_recursive(self.data, path.split('/')) if path else None
+    #             summary = _select_latest_description(val)
+    #             if summary is None:
+    #                 summary = default
+    #             if summary is not None:
+    #                 result['summary'] = summary
+
+    #         elif attr == 'keywords':
+    #             v = self._create_json_stub(self.data, row) if path else None
+    #             if v is not None:
+    #                 keywords.append(v)
+    #             if default:
+    #                 try:
+    #                     keywords.append(json.loads(default))
+    #                 except Exception:
+    #                     keywords.append(default)
+
+    #         elif attr.startswith('geospatial_'):
+    #             geo = self._create_geospatial_attributes(row) if path else {}
+    #             if geo:
+    #                 result.update(geo)
+    #             if default and attr not in result:
+    #                 result[attr] = default
+
+    #         else:
+    #             values: list[Any] = []
+    #             if path:
+    #                 v = self._create_json_stub(self.data, row)
+    #                 if v is not None:
+    #                     values.append(v)
+    #             if default:
+    #                 values.append(default)
+    #             if values:
+    #                 if attr in result:
+    #                     if not isinstance(result[attr], list):
+    #                         result[attr] = [result[attr]]
+    #                     result[attr].extend(values)
+    #                 else:
+    #                     result[attr] = values if len(values) > 1 else values[0]
+
+    #     # Build 'project' from current programAffiliations only
+    #     # Gather programAffiliation blocks from collected keywords
+    #     pa_blocks: list[Any] = []
+    #     for ele in keywords:
+    #         if isinstance(ele, dict):
+    #             for k, v in ele.items():
+    #                 if k and 'programaffiliation' in k.lower():
+    #                     if isinstance(v, list):
+    #                         pa_blocks.extend(v)
+    #                     else:
+    #                         pa_blocks.append(v)
+
+    #     uris: list[str] = []
+    #     seen = set()
+    #     for blk in pa_blocks:
+    #         if not _is_current_affiliation(blk):
+    #             continue
+    #         uri = _affiliation_uri(blk)
+    #         if uri and uri not in seen:
+    #             seen.add(uri)
+    #             uris.append(uri)
+
+    #     if uris:
+    #         result['project'] = ', '.join(uris)
+
+    #     # ALWAYS include *all* keyword rows
+    #     result['keywords'] = keywords
+
+    #     return ACDD(result)
+
+    # def facility_to_acdd(self, mapping_file: Path | str) -> ACDD:
+    #     """
+    #     Convert the ObservingFacility section of the simplified WMDR10 structure to an ACDD-compliant record.
+
+    #     Args:
+    #         mapping_file (Path | str): Path to the mapping CSV file.
+
+    #     Returns:
+    #         ACDD: ACDD-compliant metadata object.
+    #     """
+    #     mappings = load_mapping_csv(mapping_file)
+
+    #     result: dict[str, Any] = {}
+    #     keywords: list[dict[str, Any]] = []
+
+    #     for row in mappings:
+    #         attr = row["acdd_attribute"]
+    #         default = row.get("default", "").strip() or None
+
+    #         # Handle geospatial attributes
+    #         if attr.startswith("geospatial_"):
+    #             if row["wmdr10_simplified_path"]:
+    #                 value = self._create_geospatial_attributes(row)
+    #                 if value:
+    #                     result.update(value)
+    #             if default:
+    #                 result[attr] = default
+
+    #         # Handle keyword attributes
+    #         elif attr == "keywords":
+    #             values = []
+    #             if row["wmdr10_simplified_path"]:
+    #                 value = self._create_json_stub(self.data, row)
+    #                 if value:
+    #                     values.extend(value if isinstance(value, list) else [value])
+    #             if default:
+    #                 try:
+    #                     values.append(json.loads(default))
+    #                 except Exception:
+    #                     values.append(default)
+    #             keywords.extend(values)
+
+    #         # Handle regular attributes
+    #         else:
+    #             values = []
+    #             if row["wmdr10_simplified_path"]:
+    #                 value = self._create_json_stub(self.data, row)
+    #                 if value is not None:
+    #                     values.append(value)
+    #             if default:
+    #                 values.append(default)
+    #             if values:
+    #                 if attr in result:
+    #                     if not isinstance(result[attr], list):
+    #                         result[attr] = [result[attr]]
+    #                     result[attr].extend(values)
+    #                 else:
+    #                     result[attr] = values if len(values) > 1 else values[0]
+
+    #     # Promote selected keyword values to ACDD attributes
+    #     # result['project'] = [ele for ele in keywords if 'programAffiliation' in ele]
+    #     # result['project'] = ",".join([str(ele) for ele in keywords if 'programAffiliation' in ele])
+
+    #     # Store remaining keywords as list of JSON stubs
+    #     # result["keywords"] = str([ele for ele in keywords if 'programAffiliation' not in ele])
+    #     result["keywords"] = ",".join([str(ele) for ele in keywords if 'programAffiliation' not in ele])
+
+    #     return ACDD(result)
 
 
     def observation_to_acdd(self, mapping_file: Path | str) -> ACDD:
         raise NotImplementedError
 
-
-    def _create_json_stub(self, raw: dict, row: dict) -> dict | str | None:
+    def _create_json_stub(self, raw: dict, row: dict) -> dict | list | str | None:
         """
-        Create a JSON-compatible stub from simplified WMDR10 data.
-
-        Args:
-            raw (dict): Simplified WMDR10 data (i.e. self.data)
-            row (dict): A single row from the mapping file with at least:
-                - 'wmdr10_simplified_path': path to value(s) (slash-separated)
-                - 'acdd_keywords_key': optional, to group as keyword JSON stub
-
-        Returns:
-            dict | str | None: extracted stub, flat value, or None
+        Return native values resolved from 'wmdr10_simplified_path'.
+        If 'keywords_key' is present, wrap as {<key>: value} (preserve structure).
         """
-        path = row["wmdr10_simplified_path"].split("/")
-        key = row.get("keywords_key")
+        path = (row.get("wmdr10_simplified_path") or "").split("/")
+        key  = row.get("keywords_key") or row.get("acdd_keywords_key")
 
-        def walk(obj, path):
-            if not path:
-                return obj
-
-            part, *rest = path
-
-            if isinstance(obj, dict):
-                if part not in obj:
-                    return None
-                return walk(obj[part], rest)
-
-            elif isinstance(obj, list):
-                result = []
-                for item in obj:
-                    walked = walk(item, path)
-                    if walked is not None:
-                        result.append(walked)
-                return result if result else None
-
-            return None
-
-        value = walk(deepcopy(raw), path)
+        value = self._resolve_path_recursive(deepcopy(raw), path)
         if value is None:
             return None
+        return {key: value} if key else value
 
-        # Handle JSON stubs
-        if key:
-            def to_stub(entry):
-                if isinstance(entry, dict):
-                    stub = {k: v for k, v in entry.items() if k not in ("beginPosition", "endPosition")}
-                    dates = {k: entry[k] for k in ("beginPosition", "endPosition") if k in entry}
-                    if dates:
-                        return {dates.get("beginPosition", "unknown"): stub}
-                    return stub
-                return entry
+    # def _create_json_stub(self, raw: dict, row: dict) -> dict | str | None:
+    #     """
+    #     Create a JSON-compatible stub from simplified WMDR10 data.
 
-            if isinstance(value, list):
-                grouped = defaultdict(dict)
-                for item in value:
-                    stub = to_stub(item)
-                    if isinstance(stub, dict):
-                        for k, v in stub.items():
-                            grouped[k] = v
-                return {key: grouped if grouped else value}
-            return {key: to_stub(value)}
+    #     Args:
+    #         raw (dict): Simplified WMDR10 data (i.e. self.data)
+    #         row (dict): A single row from the mapping file with at least:
+    #             - 'wmdr10_simplified_path': path to value(s) (slash-separated)
+    #             - 'keywords_key': optional, to group as keyword JSON stub
+    
+    #     Returns:
+    #         dict | str | None: extracted stub, flat value, or None
+    #     """
+    #     path = row["wmdr10_simplified_path"].split("/")
+    #     key = row.get("keywords_key")
 
-        # Otherwise return flat string or object
-        return value
+    #     def walk(obj, path):
+    #         if not path:
+    #             return obj
+
+    #         part, *rest = path
+
+    #         if isinstance(obj, dict):
+    #             if part not in obj:
+    #                 return None
+    #             return walk(obj[part], rest)
+
+    #         elif isinstance(obj, list):
+    #             result = []
+    #             for item in obj:
+    #                 walked = walk(item, path)
+    #                 if walked is not None:
+    #                     result.append(walked)
+    #             return result if result else None
+
+    #         return None
+
+    #     value = walk(deepcopy(raw), path)
+    #     if value is None:
+    #         return None
+
+    #     # Handle JSON stubs
+    #     if key:
+    #         def to_stub(entry):
+    #             if isinstance(entry, dict):
+    #                 stub = {k: v for k, v in entry.items() if k not in ("beginPosition", "endPosition")}
+    #                 dates = {k: entry[k] for k in ("beginPosition", "endPosition") if k in entry}
+    #                 if dates:
+    #                     return {dates.get("beginPosition", "unknown"): stub}
+    #                 return stub
+    #             return entry
+
+    #         if isinstance(value, list):
+    #         #     grouped = defaultdict(dict)
+    #         #     for item in value:
+    #         #         stub = to_stub(item)
+    #         #         if isinstance(stub, dict):
+    #         #             for k, v in stub.items():
+    #         #                 grouped[k] = v
+    #         #     return {key: grouped if grouped else value}
+    #             d = dict()
+    #             for item in value:
+    #                 stub = to_stub(item)
+    #                 if isinstance(stub, dict):
+    #                     d.update(stub)
+    #             return {key: d or value}
+    #         return {key: to_stub(value)}
+
+    #     # Otherwise return flat string or object
+    #     return str(value)
 
 
     def _create_geospatial_attributes(self, mapping_row: dict[str, str], delta: float=0.001) -> dict[str, float | str]:
@@ -1055,38 +1555,209 @@ class WMDR10:
 
 
     def _resolve_path_recursive(self, obj: Any, path_parts: list[str]) -> Any:
-        """
-        Recursively resolve a list of path segments in a nested dictionary/list structure.
-
-        Args:
-            obj (Any): The current node in the traversal.
-            path_parts (list[str]): Remaining path segments to resolve.
-
-        Returns:
-            Any: The resolved value or None if not found.
-        """
         if not path_parts:
             return obj
+
+        head, *tail = path_parts
+        wanted = self._normalize_key(head)
 
         if isinstance(obj, list):
             results = []
             for item in obj:
-                r = self._resolve_path_recursive(item, path_parts.copy())
+                r = self._resolve_path_recursive(item, path_parts)
+                if r is None:
+                    continue
                 if isinstance(r, list):
                     results.extend(r)
-                elif r is not None:
+                else:
                     results.append(r)
             return results if results else None
 
-        elif isinstance(obj, dict):
-            head, *tail = path_parts
-            value = obj.get(head)
-            if value is None:
-                # Handle @key or key@ patterns
-                for key in obj.keys():
-                    if key.endswith(head) or key.startswith(head):
-                        value = obj[key]
-                        break
-            return self._resolve_path_recursive(value, tail)
+        if isinstance(obj, dict):
+            # 1) exact key hit first
+            if head in obj:
+                return self._resolve_path_recursive(obj[head], tail)
+            # 2) normalized equality (safer than startswith/endswith)
+            for k, v in obj.items():
+                if self._normalize_key(k) == wanted:
+                    return self._resolve_path_recursive(v, tail)
+            return None
 
         return None
+
+
+    # def _resolve_path_recursive(self, obj: Any, path_parts: list[str]) -> Any:
+    #     """
+    #     Recursively resolve a list of path segments in a nested dictionary/list structure.
+
+    #     Args:
+    #         obj (Any): The current node in the traversal.
+    #         path_parts (list[str]): Remaining path segments to resolve.
+
+    #     Returns:
+    #         Any: The resolved value or None if not found.
+    #     """
+    #     if not path_parts:
+    #         return obj
+
+    #     if isinstance(obj, list):
+    #         results = []
+    #         for item in obj:
+    #             r = self._resolve_path_recursive(item, path_parts.copy())
+    #             if isinstance(r, list):
+    #                 results.extend(r)
+    #             elif r is not None:
+    #                 results.append(r)
+    #         return results if results else None
+
+    #     elif isinstance(obj, dict):
+    #         head, *tail = path_parts
+    #         value = obj.get(head)
+    #         if value is None:
+    #             # Handle @key or key@ patterns
+    #             for key in obj.keys():
+    #                 if key.endswith(head) or key.startswith(head):
+    #                     value = obj[key]
+    #                     break
+    #         return self._resolve_path_recursive(value, tail)
+
+    #     return None
+
+
+# @dataclass
+# class WMDR20:
+#     """
+#     WMDR 2.0 metadata wrapper to manage ACDD-based records with hierarchical structure.
+
+#     - `record`: an ACDD-compliant metadata record
+#     - `parent_id`: reference to parent metadata record
+#     - `children`: list of subordinate records or file paths
+#     """
+#     record: ACDD
+#     parent_id: Optional[str] = None
+#     children: List[Union[str, 'WMDR20']] = field(default_factory=list)
+
+#     def add_child(self, child: Union[str, 'WMDR20']) -> None:
+#         """Attach a subordinate record or reference."""
+#         self.children.append(child)
+
+#     def set_parent(self, parent_id: str) -> None:
+#         """Link to a parent record by ID or path."""
+#         self.parent_id = parent_id
+
+#     def to_dict(self) -> dict:
+#         """Convert to nested dictionary representation."""
+#         return {
+#             "record": self.record.to_dict(),
+#             "parent_id": self.parent_id,
+#             "children": [
+#                 c if isinstance(c, str) else c.to_dict() for c in self.children
+#             ]
+#         }
+
+#     def to_json(self) -> str:
+#         """Export full hierarchy as JSON string."""
+#         return json.dumps(self.to_dict(), indent=2)
+
+#     def to_yaml(self) -> str:
+#         """Export full hierarchy as YAML string."""
+#         return yaml.dump(self.to_dict(), sort_keys=False)
+
+#     @classmethod
+#     def from_dict(cls, d: dict) -> 'WMDR20':
+#         """Reconstruct hierarchy from dictionary."""
+#         children = d.get("children", [])
+#         parsed_children = [
+#             c if isinstance(c, str) else WMDR20.from_dict(c)
+#             for c in children
+#         ]
+#         return cls(
+#             record=ACDD.from_dict(d["record"]),
+#             parent_id=d.get("parent_id"),
+#             children=parsed_children
+#         )
+
+#     @classmethod
+#     def from_json_file(cls, path: str) -> 'WMDR20':
+#         """Load a WMDR20 record from a JSON file."""
+#         with open(path) as f:
+#             d = json.load(f)
+#         return cls.from_dict(d)
+
+#     @classmethod
+#     def from_yaml_file(cls, path: str) -> 'WMDR20':
+#         """Load a WMDR20 record from a YAML file."""
+#         with open(path) as f:
+#             d = yaml.safe_load(f)
+#         return cls.from_dict(d)
+
+#     @staticmethod
+#     def parse_wmdr10_xml(xml_path: Union[str, Path]) -> dict:
+#         """
+#         Parse a WMDR 1.0 XML file into a dictionary using xmltodict.
+
+#         Args:
+#             xml_path (Union[str, Path]): Path to the WMDR XML file.
+
+#         Returns:
+#             dict: Parsed WMDR XML content.
+#         """
+#         with open(xml_path, "rb") as f:
+#             parsed = xmltodict.parse(f, process_namespaces=True)
+#         return parsed
+
+#     @staticmethod
+#     def strip_ns_keys(d: dict) -> dict:
+#         """
+#         Recursively remove XML namespaces from dictionary keys.
+
+#         Args:
+#             d (dict): Input dictionary.
+
+#         Returns:
+#             dict: Dictionary with stripped keys.
+#         """
+#         if isinstance(d, dict):
+#             return {k.split(":")[-1]: WMDR20.strip_ns_keys(v) for k, v in d.items()}
+#         elif isinstance(d, list):
+#             return [WMDR20.strip_ns_keys(i) for i in d]
+#         else:
+#             return d
+
+#     @classmethod
+#     def from_wmdr10(cls, xml_path: Union[str, Path]) -> 'WMDR20':
+#         """
+#         Convert WMDR 1.0 XML to WMDR20 instance with ACDD record.
+
+#         Args:
+#             xml_path (Union[str, Path]): Path to the WMDR 1.0 XML file.
+
+#         Returns:
+#             WMDR20: WMDR20 instance containing mapped ACDD metadata.
+#         """
+#         raw_data = cls.parse_wmdr10_xml(xml_path)
+#         data = cls.strip_ns_keys(raw_data)
+#         rec = data.get("WIGOSMetadataRecord", {})
+#         facility = rec.get("facility", {})
+
+#         acdd_attrs = {
+#             "title": facility.get("name"),
+#             "summary": facility.get("description"),
+#             "geospatial_lat_min": facility.get("geoLocation", {}).get("latitude"),
+#             "geospatial_lat_max": facility.get("geoLocation", {}).get("latitude"),
+#             "geospatial_lon_min": facility.get("geoLocation", {}).get("longitude"),
+#             "geospatial_lon_max": facility.get("geoLocation", {}).get("longitude"),
+#         }
+
+#         # Remove None values and warn
+#         acdd_clean = {}
+#         for k, v in acdd_attrs.items():
+#             if v is not None:
+#                 acdd_clean[k] = v
+#             else:
+#                 warnings.warn(f"Missing value for '{k}' in WMDR10 -> ACDD mapping")
+
+#         acdd = ACDD.from_dict(acdd_clean)
+#         return cls(record=acdd)
+
+
