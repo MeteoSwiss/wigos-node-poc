@@ -29,7 +29,7 @@ geospatial_,,,facility/geospatialLocation,WIGOSMetadataRecord/facility/Observing
 time_coverage_start,,,facility/dateEstablished,WIGOSMetadataRecord/facility/ObservingFacility/dateEstablished
 time_coverage_end,,,facility/dateClosed,WIGOSMetadataRecord/facility/ObservingFacility/dateClosed
 time_coverage_duration,[TODO],,,
-creator_type,[TODO],,,
+creator_type,institution,,,
 publisher_type,institution,,,
 publisher_institution,World Meteorological Organization WMO and Federal Office for Meteorology and Climatology MeteoSwiss,,,
 program,WMO Integrated Global Observing System WIGOS,,,
