@@ -32,7 +32,7 @@
   "source": "OSCAR/Surface",
   "comment": "wmdr:facility",
   "keywords_vocabulary": "codes.wmo.int/wmdr",
-  "platform": "0-20000-0-06725",
+  "platform": "0-20000-0-06725,0-756-1-Blatten",
   "platform_vocabulary": "oscar.wmo.int/surface",
   "creator_name": "[TODO]: extract from 'owner'",
   "creator_email": "[TODO]: extract from 'owner'",

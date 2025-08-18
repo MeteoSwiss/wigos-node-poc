@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 import xmltodict
 import yaml
@@ -370,7 +370,7 @@ class WMDR10:
                             deployments_all.append(cand)
 
             if deployments_all:
-                inner['deployment'] = [normalize_deployment(d) for d in deployments_all]
+                inner['deployments'] = [normalize_deployment(d) for d in deployments_all]
 
             # ---- NEW: unwrap result → ResultSet → distributionInfo → distributor ----
             if 'result' in inner and isinstance(inner['result'], (dict, list)):
@@ -752,6 +752,22 @@ class WMDR10:
 
             root['observations'] = built
 
+            # normalize observation-level deployments → 'deployments' (plural) and list-ify
+            for obs in root['observations']:
+                if not isinstance(obs, dict):
+                    continue
+                legacy = obs.pop('deployment', None)
+                if legacy is not None:
+                    legacy_list = legacy if isinstance(legacy, list) else [legacy]
+                    if 'deployments' in obs:
+                        current = obs['deployments']
+                        current_list = current if isinstance(current, list) else [current]
+                        obs['deployments'] = current_list + legacy_list
+                    else:
+                        obs['deployments'] = legacy_list
+                elif 'deployments' in obs and not isinstance(obs['deployments'], list):
+                    obs['deployments'] = [obs['deployments']]
+
         # Run same-name collapse once more post-expansion (cleans responsibleParty chains, etc.)
         while _collapse_same_name_wrappers(self.data):
             pass
@@ -823,35 +839,128 @@ class WMDR10:
         return yaml.dump(self.data, allow_unicode=True, sort_keys=False)
 
 
-    def export(self, base_path: str | Path, formats: list[str] = ["json", "yaml"]) -> list[Path]:
+    def extract(self, parts: Union[str, Iterable[str]]) -> Any:
         """
-        Export the WMDR metadata to one or more file formats (json, yaml).
+        Return portions of the simplified WMDR10 JSON.
 
-        Args:
-            base_path (str | Path): Base output path without extension.
-            formats (list[str]): List of formats to export ('json', 'yaml').
+        parts: "header" | "facility" | "observations" | "deployments", or an iterable of them.
 
-        Returns:
-            list[Path]: Paths to the generated files.
+        - "header"       -> self.data["header"]
+        - "facility"     -> self.data["facility"]
+        - "observations" -> self.data["observations"]
+        - "deployments"  -> list of deployment stubs, each enriched with:
+                            {"facility": <obs.facility>,
+                            "observedProperty": <obs.observedProperty>,
+                            "type": <obs.type>, ...deployment fields...}
 
-        Raises:
-            ValueError: If unsupported format is requested.
+        Notes:
+        • No file writing here. Use WMDR10.export(path, fmt, parts=..., index=...) for output.
+        • If multiple parts are requested, returns a dict {part: value, ...}.
+            If a single part is requested, returns that value directly.
         """
-        base_path = Path(base_path)
-        exported_files = []
+        def _norm(s: str) -> str:
+            return str(s).strip().lower()
 
-        for fmt in formats:
-            if fmt == "json":
-                path = base_path.with_suffix(".json")
-                path.write_text(self.to_json(), encoding="utf-8")
-            elif fmt == "yaml":
-                path = base_path.with_suffix(".yaml")
-                path.write_text(self.to_yaml(), encoding="utf-8")
+        def _collect_deployments() -> List[dict]:
+            out: List[dict] = []
+            obs_list = self.data.get("observations")
+            if not isinstance(obs_list, list):
+                return out
+            for obs in obs_list:
+                if not isinstance(obs, dict):
+                    continue
+                fac = obs.get("facility")
+                obs_prop = obs.get("observedProperty")
+                typ = obs.get("type")
+                deps = obs.get("deployments") or obs.get("deployment")
+                if deps is None:
+                    continue
+                if not isinstance(deps, list):
+                    deps = [deps]
+                for d in deps:
+                    stub = deepcopy(d) if isinstance(d, dict) else {"_deployment": d}
+                    stub["facility"] = fac
+                    stub["observedProperty"] = obs_prop
+                    stub["type"] = typ
+                    out.append(stub)
+            return out
+
+        if isinstance(parts, str):
+            p = _norm(parts)
+            if p == "header":
+                return self.data.get("header")
+            if p == "facility":
+                return self.data.get("facility")
+            if p == "observations":
+                return self.data.get("observations")
+            if p == "deployments":
+                return _collect_deployments()
+            raise ValueError(f"Unknown part: {parts!r}")
+
+        # multiple parts → dict
+        result: Dict[str, Any] = {}
+        wanted = [_norm(p) for p in parts]
+        if "header" in wanted:
+            result["header"] = self.data.get("header")
+        if "facility" in wanted:
+            result["facility"] = self.data.get("facility")
+        if "observations" in wanted:
+            result["observations"] = self.data.get("observations")
+        if "deployments" in wanted:
+            result["deployments"] = _collect_deployments()
+        return result
+
+
+    def export(
+        self,
+        path: Path | str,
+        fmt: str = "json",
+        *,
+        parts: Union[str, Iterable[str], None] = None,
+        index: Optional[int] = None,
+        minified: bool = False,
+    ) -> Path:
+        """
+        Export this WMDR10 object (or a selected part) to JSON or YAML.
+
+        parts: None (full WMDR10), or one/many of {"header","facility","observations","deployments"}.
+        index: If the extracted value is a list (e.g., 'deployments'), pick that element (0-based).
+        """
+        # 1) Build payload (no index passed to extract)
+        payload: Any = self.data if parts is None else self.extract(parts)
+
+        # 2) Apply optional indexing after extraction
+        if index is not None:
+            if not isinstance(payload, list):
+                raise TypeError("Parameter 'index' can only be used when the selected part returns a list "
+                                "(e.g., parts='observations' or parts='deployments').")
+            try:
+                payload = payload[index]
+            except IndexError:
+                raise IndexError(f"Index {index} out of range (len={len(payload)}).")
+
+        # 3) Serialize & write
+        fmt = fmt.lower()
+        ext_map = {"json": ".json", "yaml": ".yaml", "yml": ".yaml"}
+        if fmt not in ext_map:
+            raise ValueError("fmt must be 'json' or 'yaml'")
+
+        out_path = Path(path).with_suffix(ext_map[fmt])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if fmt == "json":
+            if minified:
+                txt = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
             else:
-                raise ValueError(f"Unsupported format: {fmt}")
-            exported_files.append(path)
+                txt = json.dumps(payload, ensure_ascii=False, indent=2)
+            out_path.write_text(txt, encoding="utf-8")
+        else:
+            if yaml is None:
+                raise RuntimeError("PyYAML is required for YAML export. Install with `pip install pyyaml`.")
+            txt = yaml.safe_dump(payload, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            out_path.write_text(txt, encoding="utf-8")
 
-        return exported_files
+        return out_path
 
 
     def facility_to_acdd(self, mapping_file: Path | str) -> ACDD:
@@ -1082,9 +1191,6 @@ class WMDR10:
         return ", ".join(uniq)
 
 
-    def observation_to_acdd(self, mapping_file: Path | str) -> ACDD:
-        raise NotImplementedError
-
     def _create_json_stub(self, raw: dict, row: dict) -> dict | list | str | None:
         """
         Return native values resolved from 'wmdr10_simplified_path'.
@@ -1197,6 +1303,10 @@ class WMDR10:
             return None
 
         return None
+
+
+    def observation_to_acdd(self, mapping_file: Path | str) -> ACDD:
+        raise NotImplementedError
 
 
 # @dataclass
