@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OSCAR nextGen Node PoC</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>OSCAR nextGen Node PoC</h1>
+      <p>Upload, review, edit, validate, and export a WMDR2 full record.</p>
+    </div>
+    <div class="status" id="status">No record loaded</div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel upload-panel">
+      <h2>1. Submit WMDR2 record</h2>
+      <label class="file-picker">
+        <span>Choose JSON file</span>
+        <input type="file" id="fileInput" accept="application/json,.json" />
+      </label>
+      <p class="muted">Or paste a record below.</p>
+      <textarea id="pasteInput" class="code" rows="12" spellcheck="false" placeholder='{"type":"Feature", ...}'></textarea>
+      <div class="actions">
+        <button id="loadPasteBtn">Load pasted JSON</button>
+        <button id="loadExampleBtn" type="button">Load example</button>
+      </div>
+      <hr />
+      <h2>Validation</h2>
+      <div id="validationPanel" class="validation empty">No validation result yet.</div>
+    </aside>
+
+    <section class="workspace">
+      <div class="toolbar">
+        <div>
+          <strong id="recordTitle">No active record</strong>
+          <div id="recordId" class="muted">Upload or paste a WMDR2 JSON Feature.</div>
+        </div>
+        <div class="actions">
+          <button id="validateBtn" disabled>Validate</button>
+          <button id="saveBtn" disabled>Save changes</button>
+          <a id="downloadLink" class="button disabled" href="#" aria-disabled="true">Download valid WMDR2</a>
+        </div>
+      </div>
+
+      <details class="card" id="facilitySection" open>
+        <summary>Facility</summary>
+        <form id="facilityForm" class="grid-form">
+          <label>Facility id <input name="id" placeholder="facility:0-20000-0-06725" /></label>
+          <label>Title <input name="title" placeholder="Blatten" /></label>
+          <label>Longitude <input name="lon" type="number" step="any" /></label>
+          <label>Latitude <input name="lat" type="number" step="any" /></label>
+          <label>Elevation <input name="elev" type="number" step="any" /></label>
+          <label>Begin date <input name="begin" placeholder="YYYY-MM-DD or .." /></label>
+          <label>End date <input name="end" placeholder="YYYY-MM-DD or .." /></label>
+          <label>WMO region <input name="wmoRegion" placeholder="europe" /></label>
+          <label class="wide">Description <textarea name="description" rows="3"></textarea></label>
+        </form>
+        <div class="actions section-actions">
+          <button data-open-modal="facilityRaw">Edit facility JSON</button>
+        </div>
+      </details>
+
+      <details class="card" id="observationsSection" open>
+        <summary>ObservationSeries <span id="observationCount" class="badge">0</span></summary>
+        <div id="observationsList" class="list"></div>
+        <div class="actions section-actions">
+          <button id="addObservationBtn">Add ObservationSeries</button>
+          <button data-open-modal="observationSeriesRaw">Edit ObservationSeries JSON</button>
+        </div>
+      </details>
+
+      <details class="card" id="deploymentsSection" open>
+        <summary>Deployments <span id="deploymentCount" class="badge">0</span></summary>
+        <p class="muted">Deployments describe instruments in use at a facility and are referenced from ObservationSeries observingConfigurations.</p>
+        <div id="deploymentsList" class="list"></div>
+        <div class="actions section-actions">
+          <button id="addDeploymentBtn">Add deployment</button>
+          <button data-open-modal="deploymentsRaw">Edit deployments JSON</button>
+        </div>
+      </details>
+
+      <details class="card" id="instrumentsSection" open>
+        <summary>Instruments <span id="instrumentCount" class="badge">0</span></summary>
+        <p class="muted">Instruments hold catalogue-like information such as manufacturer, model, and observing-method capability. Deployment records point to the instruments actually used.</p>
+        <div id="instrumentsList" class="list"></div>
+        <div class="actions section-actions">
+          <button id="addInstrumentBtn">Add instrument</button>
+          <button data-open-modal="instrumentsRaw">Edit instruments JSON</button>
+        </div>
+      </details>
+
+      <details class="card" id="contactsSection" open>
+        <summary>Contacts <span id="contactCount" class="badge">0</span></summary>
+        <div id="contactsList" class="list"></div>
+        <div class="actions section-actions">
+          <button id="addContactBtn">Add contact</button>
+          <button data-open-modal="contactsRaw">Edit contacts JSON</button>
+        </div>
+      </details>
+
+      <details class="card">
+        <summary>Full record JSON</summary>
+        <textarea id="recordRaw" class="code" rows="24" spellcheck="false"></textarea>
+        <div class="actions section-actions">
+          <button id="applyRawBtn">Apply full JSON</button>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <dialog id="jsonModal">
+    <form method="dialog" class="modal-card">
+      <header>
+        <h2 id="modalTitle">Edit JSON</h2>
+        <button value="cancel" aria-label="Close">×</button>
+      </header>
+      <textarea id="modalJson" class="code" rows="20" spellcheck="false"></textarea>
+      <footer class="actions">
+        <button value="cancel" type="button" id="modalCancelBtn">Cancel</button>
+        <button value="ok" type="button" id="modalApplyBtn">Apply</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>
