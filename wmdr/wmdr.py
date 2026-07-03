@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import json
+import numbers
 import warnings
-# from collections import defaultdict
 from copy import deepcopy
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Union, Sequence
 
 import xmltodict
 import yaml
 
-from acdd.acdd import ACDD
+# from acdd.acdd import ACDD
 from utils.utils import load_mapping_csv
+
+try:
+    import yaml  # type: ignore
+except Exception:  # pragma: no cover
+    yaml = None  # type: ignore
+
 
 
 class WMDR10:
@@ -22,6 +27,7 @@ class WMDR10:
 
     Supports input as a file path, raw XML string, or pre-parsed dictionary.
     """
+    data: Any
 
     def __init__(self, source: str | Path | dict, *, source_type: str = "file", simplify: bool = True):
         """
@@ -40,11 +46,18 @@ class WMDR10:
             ValueError: If `source_type` is invalid or parsing fails.
         """
         if source_type == "file":
-            source = Path(source)
-            with source.open("r", encoding="utf-8") as f:
+            if not isinstance(source, (str, Path)):
+                raise TypeError("When source_type='file', source must be a str or Path.")
+            source_path = Path(source)
+            with source_path.open("r", encoding="utf-8") as f:
                 self.data = xmltodict.parse(f.read(), process_namespaces=False)
 
         elif source_type == "xml":
+            # Accept either a raw XML string or a Path to an XML file; reject dicts.
+            if isinstance(source, Path):
+                source = source.read_text(encoding="utf-8")
+            if not isinstance(source, str):
+                raise TypeError("When source_type='xml', source must be an XML string or a Path.")
             self.data = xmltodict.parse(source, process_namespaces=False)
 
         elif source_type == "dict":
@@ -718,7 +731,7 @@ class WMDR10:
 
         # 7) Build flat observations
         root = self.data
-        if 'observations' in root and isinstance(root['observations'], list):
+        if isinstance(root, dict) and 'observations' in root and isinstance(root['observations'], list):
             built = []
             for item in root['observations']:
                 # unwrap {"observingcapability": {...}} items
@@ -793,13 +806,12 @@ class WMDR10:
         # 10) final scrub (targeted)
         drop_keys_ci(self.data, {"featureofinterest", "om_observation"})
         # NOTE: do NOT drop None globally (e.g., keep endPosition=None if present)
-
         # 11) rename(s) last
-        if 'headerInformation' in self.data:
+        if isinstance(self.data, dict) and 'headerInformation' in self.data:
             self.data['header'] = self.data.pop('headerInformation')
 
 
-    def to_xml(self, output_path: str | Path = None, pretty: bool = True, encoding: str = "utf-8") -> str | None:
+    def to_xml(self, output_path: Path | str | None = None, pretty: bool = True, encoding: str = "utf-8") -> str | None:
         """
         Serialize the internal dictionary to XML.
 
@@ -836,6 +848,8 @@ class WMDR10:
         Returns:
             str: YAML string representation of the metadata.
         """
+        if yaml is None:
+            raise RuntimeError("PyYAML is required for YAML export. Install with `pip install pyyaml`.")
         return yaml.dump(self.data, allow_unicode=True, sort_keys=False)
 
 
@@ -917,35 +931,70 @@ class WMDR10:
         fmt: str = "json",
         *,
         parts: Union[str, Iterable[str], None] = None,
-        index: Optional[int] = None,
+        index: Optional[Union[int, Iterable[int]]] = None,
         minified: bool = False,
     ) -> Path:
         """
         Export this WMDR10 object (or a selected part) to JSON or YAML.
 
         parts: None (full WMDR10), or one/many of {"header","facility","observations","deployments"}.
-        index: If the extracted value is a list (e.g., 'deployments'), pick that element (0-based).
+        index: If the extracted value is a list, pick an element (0-based). If an iterable of ints is
+            provided, apply nested indexing sequentially (e.g. [2, 0] => payload[2][0]).
         """
-        # 1) Build payload (no index passed to extract)
+        # --- Normalize parts for naming and extraction ---
+        part_tokens: list[str]
+        if parts is None:
+            part_tokens = []
+        elif isinstance(parts, str):
+            part_tokens = [parts]
+        else:
+            part_tokens = list(parts)
+
+        # Build payload (no index passed to extract)
         payload: Any = self.data if parts is None else self.extract(parts)
 
-        # 2) Apply optional indexing after extraction
+        # --- Normalize index (support int or iterable[int]) ---
+        index_tokens: list[int] = []
         if index is not None:
-            if not isinstance(payload, list):
-                raise TypeError("Parameter 'index' can only be used when the selected part returns a list "
-                                "(e.g., parts='observations' or parts='deployments').")
-            try:
-                payload = payload[index]
-            except IndexError:
-                raise IndexError(f"Index {index} out of range (len={len(payload)}).")
+            if isinstance(index, numbers.Integral) and not isinstance(index, bool):
+                index_tokens = [int(index)]
+            else:
+                # treat as iterable of ints
+                try:
+                    index_tokens = [int(i) for i in index]  # type: ignore[arg-type]
+                except TypeError as e:
+                    raise TypeError("Parameter 'index' must be an int or an iterable of ints.") from e
 
-        # 3) Serialize & write
+            # Apply indexing sequentially
+            for idx in index_tokens:
+                if not isinstance(payload, list):
+                    raise TypeError(
+                        "Parameter 'index' can only be used when the selected part returns a list "
+                        "(e.g., parts='observations' or parts='deployments'), and for nested indexing "
+                        "each intermediate value must also be a list."
+                    )
+                try:
+                    payload = payload[idx]
+                except IndexError as e:
+                    raise IndexError(f"Index {idx} out of range (len={len(payload)}).") from e
+
+        # --- Serialize & write ---
         fmt = fmt.lower()
         ext_map = {"json": ".json", "yaml": ".yaml", "yml": ".yaml"}
         if fmt not in ext_map:
             raise ValueError("fmt must be 'json' or 'yaml'")
 
-        out_path = Path(path).with_suffix(ext_map[fmt])
+        p = Path(path)
+        suffix = ext_map[fmt]
+
+        # Build filename: <filename>_<part>_<index_n>_<index_m>_etc.<fmt>
+        tokens: list[str] = [p.stem]
+        if part_tokens:
+            tokens.extend(part_tokens)
+        if index_tokens:
+            tokens.extend(str(i) for i in index_tokens)
+
+        out_path = p.with_name("_".join(tokens) + suffix)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         if fmt == "json":
@@ -959,81 +1008,81 @@ class WMDR10:
                 raise RuntimeError("PyYAML is required for YAML export. Install with `pip install pyyaml`.")
             txt = yaml.safe_dump(payload, allow_unicode=True, sort_keys=False, default_flow_style=False)
             out_path.write_text(txt, encoding="utf-8")
-
+        
         return out_path
 
 
-    def facility_to_acdd(self, mapping_file: Path | str) -> ACDD:
-        mappings = load_mapping_csv(mapping_file)
+    # def facility_to_acdd(self, mapping_file: Path | str) -> ACDD:
+    #     mappings = load_mapping_csv(mapping_file)
 
-        result: dict[str, Any] = {}
-        collected_keyword_entries: list[Any] = []
-        collected_projects: list[Any] = []   # <-- collect raw project inputs here
+    #     result: dict[str, Any] = {}
+    #     collected_keyword_entries: list[Any] = []
+    #     collected_projects: list[Any] = []   # <-- collect raw project inputs here
 
-        for row in mappings:
-            attr   = row['acdd_attribute']
-            path   = (row.get('wmdr10_simplified_path') or '').strip()
-            default = (row.get('default') or '').strip() or None
+    #     for row in mappings:
+    #         attr   = row['acdd_attribute']
+    #         path   = (row.get('wmdr10_simplified_path') or '').strip()
+    #         default = (row.get('default') or '').strip() or None
 
-            if attr == 'keywords':
-                v = self._create_json_stub(self.data, row) if path else None
-                if v is not None:
-                    collected_keyword_entries.append(v)
-                if default:
-                    try:
-                        collected_keyword_entries.append(json.loads(default))
-                    except Exception:
-                        collected_keyword_entries.append(default)
+    #         if attr == 'keywords':
+    #             v = self._create_json_stub(self.data, row) if path else None
+    #             if v is not None:
+    #                 collected_keyword_entries.append(v)
+    #             if default:
+    #                 try:
+    #                     collected_keyword_entries.append(json.loads(default))
+    #                 except Exception:
+    #                     collected_keyword_entries.append(default)
 
-            elif attr == 'project':
-                # just collect; do NOT assign raw JSON to result['project'] here
-                v = self._create_json_stub(self.data, row) if path else None
-                if v is not None:
-                    collected_projects.append(v)
+    #         elif attr == 'project':
+    #             # just collect; do NOT assign raw JSON to result['project'] here
+    #             v = self._create_json_stub(self.data, row) if path else None
+    #             if v is not None:
+    #                 collected_projects.append(v)
 
-            elif attr.startswith('geospatial_'):
-                geo = self._create_geospatial_attributes(row) if path else {}
-                if geo:
-                    result.update(geo)
-                if default and attr not in result:
-                    result[attr] = default
+    #         elif attr.startswith('geospatial_'):
+    #             geo = self._create_geospatial_attributes(row) if path else {}
+    #             if geo:
+    #                 result.update(geo)
+    #             if default and attr not in result:
+    #                 result[attr] = default
 
-            elif attr == 'summary':
-                val = self._resolve_path_recursive(self.data, path.split('/')) if path else None
-                result_summary = self._select_latest_description(val) or default
-                if result_summary is not None:
-                    result['summary'] = result_summary
+    #         elif attr == 'summary':
+    #             val = self._resolve_path_recursive(self.data, path.split('/')) if path else None
+    #             result_summary = self._select_latest_description(val) or default
+    #             if result_summary is not None:
+    #                 result['summary'] = result_summary
 
-            else:
-                values: list[Any] = []
-                if path:
-                    v = self._create_json_stub(self.data, row)
-                    if v is not None:
-                        values.append(v)
-                if default:
-                    values.append(default)
-                if values:
-                    if attr in result:
-                        if not isinstance(result[attr], list):
-                            result[attr] = [result[attr]]
-                        result[attr].extend(values)
-                    else:
-                        result[attr] = values if len(values) > 1 else values[0]
+    #         else:
+    #             values: list[Any] = []
+    #             if path:
+    #                 v = self._create_json_stub(self.data, row)
+    #                 if v is not None:
+    #                     values.append(v)
+    #             if default:
+    #                 values.append(default)
+    #             if values:
+    #                 if attr in result:
+    #                     if not isinstance(result[attr], list):
+    #                         result[attr] = [result[attr]]
+    #                     result[attr].extend(values)
+    #                 else:
+    #                     result[attr] = values if len(values) > 1 else values[0]
 
-        # --- projects: compute from collected entries; fallback to facility.programAffiliation ---
-        uris = self._project_uris_from(collected_projects)
-        if not uris:
-            # robust fallback if mapping doesn't provide data
-            pa = self._resolve_path_recursive(self.data, ["facility", "programAffiliation"])
-            uris = self._project_uris_from([pa] if pa is not None else [])
-        if uris:
-            # store as a LIST OF STRINGS, e.g. [".../GBON", ".../GOSGeneral"]
-            result['project'] = json.dumps(uris)
+    #     # --- projects: compute from collected entries; fallback to facility.programAffiliation ---
+    #     uris = self._project_uris_from(collected_projects)
+    #     if not uris:
+    #         # robust fallback if mapping doesn't provide data
+    #         pa = self._resolve_path_recursive(self.data, ["facility", "programAffiliation"])
+    #         uris = self._project_uris_from([pa] if pa is not None else [])
+    #     if uris:
+    #         # store as a LIST OF STRINGS, e.g. [".../GBON", ".../GOSGeneral"]
+    #         result['project'] = json.dumps(uris)
 
-        # --- keywords: each mapping-row result becomes one JSON blob string; join with commas ---
-        result['keywords'] = self._acdd_keywords_as_jsonarray_string(collected_keyword_entries)
+    #     # --- keywords: each mapping-row result becomes one JSON blob string; join with commas ---
+    #     result['keywords'] = self._acdd_keywords_as_jsonarray_string(collected_keyword_entries)
 
-        return ACDD(result)
+    #     return ACDD(result)
 
 
     def _project_uris_from(self, entries: list[Any]) -> list[str]:
@@ -1226,10 +1275,10 @@ class WMDR10:
         if not all(k in mapping_row for k in required_keys):
             # [TODO] issue warning
             warnings.warn("_create_geospatial_attributes: some required_keys are missing.")
-            return  # skip incomplete rows
+            return {}  # skip incomplete rows
 
         if not mapping_row["acdd_attribute"].startswith("geospatial_"):
-            return
+            return {}
 
         # generate geospatial_ elements
         if mapping_row["wmdr10_simplified_path"].endswith("geospatialLocation"):
@@ -1269,21 +1318,22 @@ class WMDR10:
                         })
                     return result
                 except ValueError:
-                    return
+                    return {}
         return {}
 
 
-    def _resolve_path_recursive(self, obj: Any, path_parts: list[str]) -> Any:
-        if not path_parts:
+    def _resolve_path_recursive(self, obj: Any, path_parts: Sequence[str]) -> Any:
+        parts = list(path_parts)
+        if not parts:
             return obj
 
-        head, *tail = path_parts
+        head, *tail = parts
         wanted = self._normalize_key(head)
 
         if isinstance(obj, list):
             results = []
             for item in obj:
-                r = self._resolve_path_recursive(item, path_parts)
+                r = self._resolve_path_recursive(item, parts)
                 if r is None:
                     continue
                 if isinstance(r, list):
@@ -1305,8 +1355,8 @@ class WMDR10:
         return None
 
 
-    def observation_to_acdd(self, mapping_file: Path | str) -> ACDD:
-        raise NotImplementedError
+    # def observation_to_acdd(self, mapping_file: Path | str) -> ACDD:
+    #     raise NotImplementedError
 
 
 # @dataclass
