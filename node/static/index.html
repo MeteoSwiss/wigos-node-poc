@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OSCAR nextGen Node PoC</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=0.14.0" />
 </head>
 <body>
   <header class="topbar">
     <div>
       <h1>OSCAR nextGen Node PoC</h1>
-      <p>Upload, review, edit, validate, and export a WMDR2 full record.</p>
+      <p>Upload, review, edit, validate, and export a WMDR2 v0.3.x full record.</p>
     </div>
     <div class="status" id="status">No record loaded</div>
   </header>
@@ -47,62 +47,81 @@
       </div>
 
       <details class="card" id="facilitySection" open>
-        <summary>Facility</summary>
-        <form id="facilityForm" class="grid-form">
-          <label>Facility id <input name="id" placeholder="facility:0-20000-0-06725" /></label>
-          <label>Title <input name="title" placeholder="Blatten" /></label>
-          <label>Longitude <input name="lon" type="number" step="any" /></label>
-          <label>Latitude <input name="lat" type="number" step="any" /></label>
-          <label>Elevation <input name="elev" type="number" step="any" /></label>
-          <label>Begin date <input name="begin" placeholder="YYYY-MM-DD or .." /></label>
-          <label>End date <input name="end" placeholder="YYYY-MM-DD or .." /></label>
-          <label>WMO region <input name="wmoRegion" placeholder="europe" /></label>
+        <summary>
+          <span>Facility</span>
+          <button class="summary-action" data-open-modal="facilityRaw" type="button">Edit JSON</button>
+        </summary>
+        <form id="facilityForm" class="facility-form">
+          <div class="facility-row facility-main-row">
+            <label>Facility id <input name="id" placeholder="0-20000-0-06725" /></label>
+            <label>Title <input name="title" placeholder="Blatten" /></label>
+            <label>WMO region <input name="wmoRegion" placeholder="europe" /></label>
+          </div>
+          <div class="facility-row facility-date-row">
+            <label>Begin date <input name="begin" placeholder="YYYY-MM-DD or .." /></label>
+            <label>End date <input name="end" placeholder="YYYY-MM-DD or .." /></label>
+          </div>
+          <div class="hidden-fields" aria-hidden="true">
+            <input name="lon" type="hidden" />
+            <input name="lat" type="hidden" />
+            <input name="elev" type="hidden" />
+          </div>
+          <details class="subsection inline-details" id="temporalGeometryEditor">
+            <summary>Geolocation history <span id="temporalGeometryCount" class="badge">0</span></summary>
+            <p class="muted">Edits the top-level <code>temporalGeometry</code> MovingPoint. The current top-level <code>geometry</code> is updated automatically from the latest complete row.</p>
+            <div id="temporalGeometryList" class="list"></div>
+            <div class="actions section-actions">
+              <button id="addTemporalGeometryBtn" type="button">Add geolocation row</button>
+            </div>
+          </details>
           <label class="wide">Description <textarea name="description" rows="3"></textarea></label>
         </form>
-        <div class="actions section-actions">
-          <button data-open-modal="facilityRaw">Edit facility JSON</button>
-        </div>
       </details>
 
-      <details class="card" id="observationsSection" open>
-        <summary>ObservationSeries <span id="observationCount" class="badge">0</span></summary>
+      <details class="card" id="observationsSection">
+        <summary>
+          <span>ObservationSeries <span id="observationCount" class="badge">0</span></span>
+          <button class="summary-action" data-open-modal="observationSeriesRaw" type="button">Edit JSON</button>
+        </summary>
         <div id="observationsList" class="list"></div>
         <div class="actions section-actions">
           <button id="addObservationBtn">Add ObservationSeries</button>
-          <button data-open-modal="observationSeriesRaw">Edit ObservationSeries JSON</button>
         </div>
       </details>
 
-      <details class="card" id="deploymentsSection" open>
-        <summary>Deployments <span id="deploymentCount" class="badge">0</span></summary>
-        <p class="muted">Deployments describe instruments in use at a facility and are referenced from ObservationSeries observingConfigurations.</p>
-        <div id="deploymentsList" class="list"></div>
-        <div class="actions section-actions">
-          <button id="addDeploymentBtn">Add deployment</button>
-          <button data-open-modal="deploymentsRaw">Edit deployments JSON</button>
-        </div>
+      <details class="card" id="configurationsSection">
+        <summary>
+          <span>Observing configurations <span id="configurationCount" class="badge">0</span></span>
+          <button class="summary-action" data-open-modal="configurationsRaw" type="button">Edit JSON</button>
+        </summary>
+        <p class="muted">WMDR2 v0.3.x no longer has facility-level deployments. The dated observing context is edited here from ObservationSeries observingConfigurations, including time interval, location context, serial number, and optional instrument references.</p>
+        <div id="configurationsList" class="list"></div>
       </details>
 
-      <details class="card" id="instrumentsSection" open>
-        <summary>Instruments <span id="instrumentCount" class="badge">0</span></summary>
-        <p class="muted">Instruments hold catalogue-like information such as manufacturer, model, and observing-method capability. Deployment records point to the instruments actually used.</p>
+      <details class="card" id="instrumentsSection">
+        <summary>
+          <span>Instruments <span id="instrumentCount" class="badge">0</span></span>
+          <button class="summary-action" data-open-modal="instrumentsRaw" type="button">Edit JSON</button>
+        </summary>
+        <p class="muted">Instruments hold catalogue-like information such as manufacturer, model, and observing-method capability. ObservingConfigurations point to instruments when the instrument type is known.</p>
         <div id="instrumentsList" class="list"></div>
         <div class="actions section-actions">
           <button id="addInstrumentBtn">Add instrument</button>
-          <button data-open-modal="instrumentsRaw">Edit instruments JSON</button>
         </div>
       </details>
 
-      <details class="card" id="contactsSection" open>
-        <summary>Contacts <span id="contactCount" class="badge">0</span></summary>
+      <details class="card" id="contactsSection">
+        <summary>
+          <span>Contacts <span id="contactCount" class="badge">0</span></span>
+          <button class="summary-action" data-open-modal="contactsRaw" type="button">Edit JSON</button>
+        </summary>
         <div id="contactsList" class="list"></div>
         <div class="actions section-actions">
           <button id="addContactBtn">Add contact</button>
-          <button data-open-modal="contactsRaw">Edit contacts JSON</button>
         </div>
       </details>
 
-      <details class="card">
+      <details class="card" id="fullRecordSection">
         <summary>Full record JSON</summary>
         <textarea id="recordRaw" class="code" rows="24" spellcheck="false"></textarea>
         <div class="actions section-actions">
@@ -111,6 +130,51 @@
       </details>
     </section>
   </main>
+
+  <dialog id="ownerContactModal">
+    <form method="dialog" class="modal-card owner-contact-dialog">
+      <header>
+        <h2 id="ownerContactModalTitle">Owner contact</h2>
+        <button value="cancel" aria-label="Close">×</button>
+      </header>
+      <section class="modal-body">
+        <p class="muted" id="ownerContactModalHelp">Assign an existing contact as facility owner, or create a new owner contact.</p>
+        <label>Existing contact
+          <select id="ownerContactSelect"></select>
+        </label>
+      </section>
+      <footer class="actions">
+        <button value="cancel" type="button" id="ownerContactCancelBtn">Cancel</button>
+        <button value="jump" type="button" id="ownerContactJumpBtn">Go to selected contact</button>
+        <button value="assign" type="button" id="ownerContactAssignBtn">Assign as owner</button>
+        <button value="new" type="button" id="ownerContactNewBtn">Add new owner contact</button>
+      </footer>
+    </form>
+  </dialog>
+
+
+  <dialog id="saveModal">
+    <form method="dialog" class="modal-card save-dialog">
+      <header>
+        <h2>Save WMDR2 record</h2>
+        <button value="cancel" aria-label="Close">×</button>
+      </header>
+      <section class="modal-body">
+        <p class="muted">Browser uploads do not expose the original local folder. This saves the record in the Node data directory; edit the server-side folder and file name below.</p>
+        <label>Server-side folder
+          <input id="saveLocationInput" placeholder="data/records" />
+        </label>
+        <label>File name
+          <input id="saveFileNameInput" placeholder="0-20000-0-06725.json" />
+        </label>
+        <div id="saveResult" class="validation empty">No save result yet.</div>
+      </section>
+      <footer class="actions">
+        <button value="cancel" type="button" id="saveCancelBtn">Cancel</button>
+        <button value="ok" type="button" id="saveConfirmBtn">Save</button>
+      </footer>
+    </form>
+  </dialog>
 
   <dialog id="jsonModal">
     <form method="dialog" class="modal-card">
@@ -126,6 +190,6 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js" type="module"></script>
+  <script src="/static/app.js?v=0.14.0" type="module"></script>
 </body>
 </html>

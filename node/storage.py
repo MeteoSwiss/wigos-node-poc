@@ -28,6 +28,13 @@ class RecordStore:
         path.write_text(json.dumps(normalized, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         return normalized
 
+    def save_as(self, record: dict[str, Any], filename: str, location: str = "data/records") -> tuple[dict[str, Any], Path]:
+        normalized = self.save(record)
+        destination = self._save_as_path(filename=filename, location=location)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(normalized, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return normalized, destination
+
     def get(self, record_id: str) -> dict[str, Any]:
         path = self._path(record_id)
         if not path.exists():
@@ -41,7 +48,7 @@ class RecordStore:
             if not isinstance(value, dict):
                 raise ValueError("facility section must be an object")
             self._merge_facility(record, value)
-        elif section in {"observationSeries", "observations", "deployments", "instruments", "contacts", "schedules", "reporting"}:
+        elif section in {"observationSeries", "observations", "instruments", "contacts", "schedules"}:
             if not isinstance(value, list):
                 raise ValueError(f"{section} section must be an array")
             canonical = "observationSeries" if section == "observations" else section
@@ -55,6 +62,29 @@ class RecordStore:
         if not path.exists():
             raise KeyError(record_id)
         return path
+
+    def _save_as_path(self, filename: str, location: str) -> Path:
+        filename = Path(filename).name.strip()
+        if not filename:
+            raise ValueError("File name must not be empty")
+        if not filename.lower().endswith(".json"):
+            filename = f"{filename}.json"
+        filename = safe_filename(filename.removesuffix(".json")) + ".json"
+
+        normalized_location = location.strip() or "data/records"
+        if normalized_location in {".", "./", "data/records", "data/records/"}:
+            directory = self.root
+        else:
+            raw_location = Path(normalized_location)
+            if raw_location.is_absolute():
+                raise ValueError("Location must be relative to the Node data directory")
+            directory = self.root / raw_location
+
+        root = self.root.resolve()
+        destination = (directory / filename).resolve()
+        if not destination.is_relative_to(root):
+            raise ValueError("Location must stay inside the Node data directory")
+        return destination
 
     def _path(self, record_id: str) -> Path:
         return self.root / f"{safe_filename(record_id)}.json"
@@ -76,7 +106,7 @@ class RecordStore:
             "timeZone",
             "regionOfOrigin",
             "territory",
-            "programAffiliation",
+            "programAffiliations",
             "environment",
         ):
             if key in value:

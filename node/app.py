@@ -14,8 +14,8 @@ from .validation import normalize_record, validate_record
 
 app = FastAPI(
     title="OSCAR nextGen Node PoC",
-    version="0.4.0",
-    description="Local PoC node for upload, review/edit, validation, and export of WMDR2 full records.",
+    version="0.13.0",
+    description="Local PoC node for upload, review/edit, validation, and export of WMDR2 v0.3.x full records.",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -70,10 +70,35 @@ def get_record(record_id: str) -> dict[str, Any]:
 @app.put("/api/records/{record_id}")
 def replace_record(record_id: str, record: dict[str, Any]) -> dict[str, Any]:
     record = normalize_record(record)
-    record["id"] = record_id
+    if not record.get("id"):
+        record["id"] = record_id
     saved = store.save(record)
     report = validate_record(saved)
     return {"id": saved["id"], "record": saved, "validation": report.as_dict()}
+
+
+
+
+@app.post("/api/records/{record_id}/save-as")
+def save_record_as(record_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    record = payload.get("record")
+    if not isinstance(record, dict):
+        raise HTTPException(status_code=400, detail="Payload must include a WMDR2 record object")
+    filename = payload.get("filename") or f"{record_id}.json"
+    location = payload.get("location") or "data/records"
+    try:
+        saved, path = store.save_as(record, filename=str(filename), location=str(location))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    report = validate_record(saved)
+    return {
+        "id": saved["id"],
+        "record": saved,
+        "validation": report.as_dict(),
+        "saved_as": str(path),
+        "location": str(location),
+        "filename": Path(str(filename)).name,
+    }
 
 
 @app.patch("/api/records/{record_id}/sections/{section}")

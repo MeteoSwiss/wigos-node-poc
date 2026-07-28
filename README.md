@@ -1,115 +1,51 @@
 # OSCAR nextGen Node PoC
 
-This is a small, local proof of concept for an OSCAR nextGen **Node**. It lets a user upload or paste a WMDR2 full record, review and edit the core parts in a browser, save the changed record locally, validate it structurally, and download the resulting WMDR2 JSON record.
+Version: v0.14.0 v0.14.0
 
-The implementation is intentionally modest: one FastAPI backend, one vanilla HTML/CSS/JavaScript UI, JSON-file storage, and a local WMDR2 core schema fragment. That keeps the first development phase easy to run, inspect, and replace later with a stronger backend, workflow engine, identity integration, or an OGC API publication layer.
+Local proof-of-concept editor for WMDR2 v0.3.x full records.
 
-## What this PoC covers
+## What changed in v0.14.0
 
-- Submit a WMDR2 full record as JSON file upload or pasted JSON.
-- Review and edit:
-  - Facility metadata, root geometry and lifecycle interval.
-  - `properties.observationSeries`.
-  - `properties.deployments`, as a separate section, because deployments describe instruments in use and are referenced by ObservationSeries.
-  - `properties.instruments`, as a separate section, with manufacturer/model and observing-method capability where known.
-  - `properties.contacts`, accepting the current simple e-mail and phone string arrays.
-- Use collapsible sections for normal editing.
-- Navigate relationships with actionable cross-links: ObservationSeries → deployments, deployments → referring ObservationSeries, deployments → instruments, instruments → using deployments, facility → owner contacts, and ObservationSeries → non-owner role contacts.
-- Use modal pop-up JSON editors for deeper metadata and fields that do not yet have dedicated form widgets, including raw relationship references that are intentionally hidden from the main cards once represented as links.
-- Save the edited record to local JSON-file storage.
-- Validate the saved record against a WMDR2 core schema fragment.
-- Download the valid WMDR2 full record as JSON.
+This release focuses on reducing page clutter and making navigation/save behavior explicit.
 
-## Why this shape
+- Top-level sections now keep their **Edit JSON** button in the summary row, so it remains available even when the section is collapsed.
+- On initial record load, only **Facility** is expanded; all other sections are collapsed.
+- Cross-section navigation now opens the target section and collapses the other top-level sections.
+- The Facility geolocation editor is now named **Geolocation history** and remains a collapsible table under Facility.
+- The ObservationSeries form has been rearranged:
+  - row 1: ID and title, shown read-only in the form;
+  - row 2: observed property and observed geometry;
+  - row 3: domain, domain feature, feature name.
+- **Save changes** now opens a save dialog instead of silently saving:
+  - it suggests the original uploaded file name when available;
+  - it suggests the Node data folder as the location;
+  - both folder and file name can be edited before saving.
+- Added a backend `/save-as` endpoint that writes a named JSON file under the Node data directory and rejects path traversal.
 
-The current WMDR2 draft tooling represents a full record as a facility-centric GeoJSON-like `Feature`, with WMDR2-specific content under `properties`. The PoC follows that shape directly. It also keeps the editorial UI separate from any later OGC API publication endpoint: editing needs workflow/state/change management, while public catalogue access can later be backed by pygeoapi or another OGC API implementation.
-
-This version is aligned with the current `wmdr2-devt` v0.2.5.x examples: `observationSeries` rather than `observations`, `observedFeature` rather than `observedDomain`, singular `programAffiliation`, scalar `deployment.instrument`, and simple string arrays for contact `emails` and `phones`.
-
-For usability, raw reference fields such as `observingConfigurations[*].deployment` and `deployment.instrument` are not shown as ordinary text inputs in the main cards. They remain in the JSON record and can still be edited through the item-level or section-level JSON dialogs.
+Note: browsers do not expose the original local upload folder to the web app. The save dialog therefore works with a server-side folder under the Node data directory. The normal browser download flow is still available through **Download valid WMDR2**.
 
 ## Run locally
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn node.app:app --reload
 ```
 
-Open:
+Open <http://127.0.0.1:8000/>.
 
-```text
-http://127.0.0.1:8000/
-```
-
-The UI includes a built-in example record. Use **Load example** to test the workflow immediately.
-
-## Run tests
+## Checks
 
 ```bash
-pip install -e .[dev]
+node --check node/static/app.js
 pytest -q
 ```
 
-## Run with Docker
 
-```bash
-docker build -t oscar-nextgen-node-poc .
-docker run --rm -p 8000:8000 -v "$PWD/data/records:/app/data/records" oscar-nextgen-node-poc
-```
+## v0.14.0 notes
 
-## API overview
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/` | Browser UI |
-| `GET` | `/health` | Health check |
-| `GET` | `/api/schema` | PoC validation schema |
-| `GET` | `/api/records` | List locally saved record ids |
-| `POST` | `/api/records` | Upload or submit a WMDR2 record |
-| `GET` | `/api/records/{record_id}` | Read saved record plus validation report |
-| `PUT` | `/api/records/{record_id}` | Replace full saved record |
-| `PATCH` | `/api/records/{record_id}/sections/{section}` | Replace one editable section |
-| `POST` | `/api/records/{record_id}/validate` | Validate saved record |
-| `GET` | `/api/records/{record_id}/download` | Download only if structurally valid |
-
-Supported section names are `facility`, `observationSeries`, `deployments`, `instruments`, `contacts`, `reporting`, and `schedules`. The older PoC alias `observations` is still accepted and saved as `observationSeries`.
-
-## Storage
-
-Records are stored as JSON files under:
-
-```text
-data/records/
-```
-
-Override with:
-
-```bash
-export OSCAR_NODE_DATA_DIR=/path/to/records
-```
-
-This is deliberately simple. The next step would normally be a repository layer backed by PostgreSQL JSONB, object storage, or Git-like versioned JSON artifacts.
-
-## Validation notes
-
-The PoC schema catches the core structural problems most likely to arise during editing:
-
-- root `type`, `id`, `geometry`, `time`, `conformsTo`, and `properties`;
-- required `properties.type = "facility"` and `properties.title`;
-- current names such as `observedProperty`, `observedGeometry`, and `referenceSurface`;
-- forbidden legacy names such as `observedVariable`, `observedGeometryType`, `localReferenceSurface`, and top-level `properties.temporalGeometry`;
-- structural checks for observation series, deployments, instruments, contacts, and temporal geometry;
-- semantic warnings for broken observation → deployment and deployment → instrument references.
-
-It does **not** yet validate WMO code-list membership, authorization, workflow states, approval history, or synchronization with a Global Data Centre/cache.
-
-## Suggested next development slices
-
-1. Replace or augment the local schema fragment with the authoritative schema files from `wmo-im/wmdr2-devt/schemas` as a Git submodule or build-time copy.
-2. Add codelist-aware controls for fields such as observed property, observed geometry, facility type, WMO region, reporting status, and program affiliation.
-3. Add versioning: draft, submitted, reviewed, approved, published.
-4. Add richer referential integrity controls, such as one-click creation of missing deployments/instruments from broken references and dedicated relationship pickers for deployment/instrument/contact links.
-5. Add a publication adapter that writes validated records into an OGC API Records/pygeoapi-compatible catalogue view.
-6. Add container composition with persistent storage and, later, identity/authentication.
+- ObservationSeries item headers now show `id [title]`, keeping read-only ID/title out of the editable form.
+- ObservationSeries item buttons now use the clearer label **Edit JSON**.
+- ObservationSeries forms now emphasize: observed property/geometry, observed feature domain fields, program affiliations, and application areas.
+- Legacy `applicationArea` is normalized to current `applicationAreas`; legacy `observedDomain` is normalized to `observedFeature`.

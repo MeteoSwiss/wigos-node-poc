@@ -3,7 +3,21 @@ const state = {
   recordId: null,
   validation: null,
   modalTarget: null,
+  pendingScrollTarget: null,
+  selectedTemporalGeometryIndex: null,
+  sourceFilename: null,
+  saveLocation: 'data/records',
+  justLoaded: false,
 };
+
+const TOP_LEVEL_SECTION_IDS = [
+  'facilitySection',
+  'observationsSection',
+  'configurationsSection',
+  'instrumentsSection',
+  'contactsSection',
+  'fullRecordSection',
+];
 
 const $ = (id) => document.getElementById(id);
 const asArray = (value) => Array.isArray(value) ? value : [];
@@ -11,7 +25,7 @@ const pretty = (value) => JSON.stringify(value ?? null, null, 2);
 
 const exampleRecord = {
   type: 'Feature',
-  id: 'facility:0-20000-0-06725',
+  id: '0-20000-0-06725',
   geometry: { type: 'Point', coordinates: [7.8232, 46.4204, 1540] },
   temporalGeometry: {
     type: 'MovingPoint',
@@ -19,7 +33,7 @@ const exampleRecord = {
     dates: ['2000-08-17', '2024-01-17'],
     methods: [[], ['gps']],
   },
-  time: { interval: ['2000-08-17', '..'] },
+  time: { interval: ['2000-08-17', '..'], resolution: 'P1D' },
   conformsTo: ['http://wigos.wmo.int/spec/wmdr/2/conf/core'],
   properties: {
     type: 'facility',
@@ -29,12 +43,18 @@ const exampleRecord = {
     keywords: ['0-20000-0-06725', 'Blatten'],
     contacts: [
       {
+        identifier: 'contact:metadata-office',
         organization: 'Example NMHS',
         name: 'Station metadata office',
         roles: ['owner', 'pointOfContact'],
         emails: ['metadata@example.invalid'],
       },
     ],
+    programAffiliations: [
+      { time: { interval: ['2000-08-17', '..'] }, program: 'GOSGeneral', reportingStatus: 'operational' },
+    ],
+    territory: [{ time: { interval: ['2000-08-17', '..'] }, territory: 'CHE' }],
+    environment: [{ time: { interval: ['2000-08-17', '..'] }, surfaceCover: 'grassland' }],
     observationSeries: [
       {
         id: 'observationSeries:12006',
@@ -42,30 +62,28 @@ const exampleRecord = {
         observedProperty: 12006,
         observedFeature: { domain: 'atmosphere', domainFeature: 'near-surface-air', featureName: '10 m air' },
         observedGeometry: 'point',
-        programAffiliation: ['GOSGeneral'],
+        programAffiliations: ['GOSGeneral'],
+        applicationAreas: ['weatherForecasting'],
         observingConfigurations: [
-          { date: '2020-01-01', deployment: 'deployment:wind-10m', observingMethod: 266, operatingStatus: 'operational' },
+          {
+            time: { interval: ['2020-01-01', '..'] },
+            referenceSurface: 'localGround',
+            verticalDistanceFromReferenceSurface: { value: 10, uom: 'm' },
+            observingMethod: 266,
+            sourceOfObservation: 'automaticReading',
+            instrument: 'instrument:wind-sensor-type-a',
+          },
         ],
-      },
-    ],
-    deployments: [
-      {
-        id: 'deployment:wind-10m',
-        referenceSurface: 'localGround',
-        verticalDistanceFromReferenceSurface: { value: 10, uom: 'm' },
-        instrument: 'instrument:wind-sensor-1',
-        sourceOfObservation: 'automaticReading',
       },
     ],
     instruments: [
       {
-        id: 'instrument:wind-sensor-1',
+        id: 'instrument:wind-sensor-type-a',
         manufacturer: 'Example manufacturer',
         model: 'WindSensor X',
         observingMethods: [266],
       },
     ],
-    reporting: [],
     schedules: [],
   },
 };
@@ -73,9 +91,11 @@ const exampleRecord = {
 function props() {
   state.record.properties ??= { type: 'facility', title: '' };
   state.record.properties.observationSeries ??= [];
-  state.record.properties.deployments ??= [];
   state.record.properties.instruments ??= [];
   state.record.properties.contacts ??= [];
+  state.record.properties.schedules ??= [];
+  delete state.record.properties.deployments;
+  delete state.record.properties.reporting;
   return state.record.properties;
 }
 
@@ -107,11 +127,17 @@ async function api(path, options = {}) {
   return payload;
 }
 
-async function loadRecord(record) {
+async function loadRecord(record, sourceFilename = null) {
   const result = await api('/api/records', { method: 'POST', body: JSON.stringify(record) });
+  acceptLoadedRecord(result, sourceFilename);
+}
+
+function acceptLoadedRecord(result, sourceFilename = null) {
   state.record = result.record;
   state.recordId = result.id;
   state.validation = result.validation;
+  state.sourceFilename = sourceFilename || defaultSaveFileName();
+  state.justLoaded = true;
   renderAll();
 }
 
@@ -126,6 +152,7 @@ async function saveFullRecord() {
   state.recordId = result.id;
   state.validation = result.validation;
   renderAll();
+  return result;
 }
 
 async function validateRecord() {
@@ -143,11 +170,20 @@ function renderAll() {
   $('downloadLink').href = `/api/records/${encodeURIComponent(state.record.id)}/download`;
   renderFacility();
   renderObservationSeries();
-  renderDeployments();
+  renderConfigurationsOverview();
   renderInstruments();
   renderContacts();
   $('recordRaw').value = pretty(state.record);
   renderValidation();
+  if (state.justLoaded) {
+    state.justLoaded = false;
+    focusSection('facilitySection', { scroll: false });
+  }
+  if (state.pendingScrollTarget) {
+    const target = state.pendingScrollTarget;
+    state.pendingScrollTarget = null;
+    window.setTimeout(() => scrollToItem(target), 0);
+  }
 }
 
 function renderValidation() {
@@ -162,7 +198,7 @@ function renderValidation() {
   const warnings = state.validation.warnings || [];
   const valid = state.validation.valid;
   panel.className = `validation ${valid ? (warnings.length ? 'warning' : 'valid') : 'invalid'}`;
-  setStatus(valid ? (warnings.length ? 'Valid with warnings' : 'Valid WMDR2') : 'Invalid WMDR2', valid ? (warnings.length ? 'warning' : 'valid') : 'invalid');
+  setStatus(valid ? (warnings.length ? 'Valid with warnings' : 'Valid WMDR2 v0.3.x') : 'Invalid WMDR2 v0.3.x', valid ? (warnings.length ? 'warning' : 'valid') : 'invalid');
   const parts = [];
   parts.push(`<strong>${valid ? 'Structurally valid.' : `${errors.length} error(s).`}</strong>`);
   if (errors.length) {
@@ -188,6 +224,7 @@ function renderFacility() {
   const interval = state.record.time?.interval || [];
   form.elements.begin.value = interval[0] ?? '';
   form.elements.end.value = interval[1] ?? '';
+  renderTemporalGeometryHistory();
   renderFacilityContactLinks();
 }
 
@@ -200,78 +237,337 @@ function syncFacilityForm() {
   p.title = form.elements.title.value.trim() || 'Untitled facility';
   p.description = form.elements.description.value;
   if (form.elements.wmoRegion.value.trim()) p.wmoRegion = form.elements.wmoRegion.value.trim();
+  else delete p.wmoRegion;
   const lon = numberOrNull(form.elements.lon.value);
   const lat = numberOrNull(form.elements.lat.value);
   const elev = numberOrNull(form.elements.elev.value);
   if (lon !== null && lat !== null) {
-    const coords = elev === null ? [lon, lat] : [lon, lat, elev];
-    state.record.geometry = { type: 'Point', coordinates: coords };
+    state.record.geometry = { type: 'Point', coordinates: elev === null ? [lon, lat] : [lon, lat, elev] };
   }
+  syncTemporalGeometryForms();
   const begin = form.elements.begin.value.trim() || '..';
   const end = form.elements.end.value.trim() || '..';
-  state.record.time = { interval: [begin, end] };
+  state.record.time = { interval: [begin, end], resolution: state.record.time?.resolution || 'P1D' };
+}
+
+function temporalGeometryRows() {
+  const tg = state.record?.temporalGeometry;
+  if (!tg || tg.type !== 'MovingPoint') return [];
+  const coordinates = asArray(tg.coordinates);
+  const dates = asArray(tg.dates);
+  const methods = asArray(tg.methods);
+  const count = Math.max(coordinates.length, dates.length, methods.length);
+  return Array.from({ length: count }, (_, index) => ({
+    coordinates: asArray(coordinates[index]),
+    date: dates[index] ?? '..',
+    methods: asArray(methods[index]),
+  }));
+}
+
+function renderTemporalGeometryHistory() {
+  const rows = temporalGeometryRows();
+  const count = $('temporalGeometryCount');
+  const list = $('temporalGeometryList');
+  if (!count || !list) return;
+  count.textContent = rows.length;
+  if (!rows.length) {
+    state.selectedTemporalGeometryIndex = null;
+    list.innerHTML = '<p class="muted">No temporalGeometry history yet. Add a row from the current facility geometry.</p>';
+    return;
+  }
+  if (state.selectedTemporalGeometryIndex === null || state.selectedTemporalGeometryIndex >= rows.length) {
+    state.selectedTemporalGeometryIndex = 0;
+  }
+  list.innerHTML = `
+    <div class="table-wrap temporal-geometry-table-wrap">
+      <table class="data-table temporal-geometry-table">
+        <thead>
+          <tr>
+            <th scope="col">Selected</th>
+            <th scope="col">Date</th>
+            <th scope="col">Longitude</th>
+            <th scope="col">Latitude</th>
+            <th scope="col">Elevation</th>
+            <th scope="col">Methods</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>${rows.map((row, index) => temporalGeometryRowHtml(row, index)).join('')}</tbody>
+      </table>
+    </div>
+    <p class="muted">Select a row to focus it, edit values directly in the table, or add another row from the current facility coordinates.</p>`;
+}
+
+function temporalGeometryRowHtml(row, index) {
+  const coordinates = row.coordinates;
+  const selected = state.selectedTemporalGeometryIndex === index;
+  return `
+    <tr class="temporal-geometry-item ${selected ? 'selected' : ''}" id="${temporalGeometryDomId(index)}" data-item-kind="temporalGeometry" data-kind="temporalGeometry" data-index="${index}" data-temporal-geometry-index="${index}">
+      <td>
+        <button class="small-button" data-select-temporal-geometry="${index}" type="button" aria-pressed="${selected ? 'true' : 'false'}">${selected ? 'Editing' : 'Edit'}</button>
+      </td>
+      <td><label class="sr-only">Date for geolocation row ${index + 1}</label><input data-field="date" placeholder="YYYY-MM-DD or .." value="${escapeAttr(row.date || '..')}" /></td>
+      <td><label class="sr-only">Longitude for geolocation row ${index + 1}</label><input data-field="lon" type="number" step="any" value="${escapeAttr(coordinates[0] ?? '')}" /></td>
+      <td><label class="sr-only">Latitude for geolocation row ${index + 1}</label><input data-field="lat" type="number" step="any" value="${escapeAttr(coordinates[1] ?? '')}" /></td>
+      <td><label class="sr-only">Elevation for geolocation row ${index + 1}</label><input data-field="elev" type="number" step="any" value="${escapeAttr(coordinates[2] ?? '')}" /></td>
+      <td><label class="sr-only">Methods for geolocation row ${index + 1}</label><input data-field="methods" placeholder="gps" value="${escapeAttr(asArray(row.methods).join(', '))}" /></td>
+      <td><button class="small-button danger" data-delete-temporal-geometry="${index}" type="button">Delete</button></td>
+    </tr>`;
+}
+
+function syncTemporalGeometryForms() {
+  const list = $('temporalGeometryList');
+  if (!state.record || !list) return;
+  const forms = [...list.querySelectorAll('[data-kind="temporalGeometry"]')];
+  if (!forms.length) {
+    delete state.record.temporalGeometry;
+    return;
+  }
+  const coordinates = [];
+  const dates = [];
+  const methods = [];
+  forms.forEach(form => {
+    const field = name => form.querySelector(`[data-field="${name}"]`);
+    const lon = numberOrOriginal(field('lon')?.value);
+    const lat = numberOrOriginal(field('lat')?.value);
+    const elevText = field('elev')?.value ?? '';
+    const coordinate = [lon, lat];
+    if (String(elevText).trim() !== '') coordinate.push(numberOrOriginal(elevText));
+    coordinates.push(coordinate);
+    dates.push((field('date')?.value || '').trim() || '..');
+    methods.push(splitValues(field('methods')?.value || ''));
+  });
+  state.record.temporalGeometry = { type: 'MovingPoint', coordinates, dates, methods };
+  updateCurrentGeometryFromLatestTemporalGeometry();
+}
+
+function updateCurrentGeometryFromLatestTemporalGeometry() {
+  const rows = temporalGeometryRows();
+  const latest = [...rows].reverse().find(row => isCompleteCoordinate(row.coordinates));
+  if (!latest) return;
+  state.record.geometry = {
+    type: 'Point',
+    coordinates: latest.coordinates.slice(0, 3).map(value => Number.isFinite(Number(value)) ? Number(value) : value),
+  };
+}
+
+function isCompleteCoordinate(coordinates) {
+  return Array.isArray(coordinates)
+    && coordinates.length >= 2
+    && coordinates[0] !== null
+    && coordinates[0] !== ''
+    && coordinates[1] !== null
+    && coordinates[1] !== ''
+    && Number.isFinite(Number(coordinates[0]))
+    && Number.isFinite(Number(coordinates[1]));
+}
+
+function temporalGeometryDomId(index) {
+  return `temporalGeometry-${index}`;
+}
+
+function formatCoordinate(coordinates) {
+  if (!coordinates.length) return 'missing coordinates';
+  return coordinates.map(value => value ?? '').join(', ');
+}
+
+function numberOrOriginal(value) {
+  const text = String(value ?? '').trim();
+  if (text === '') return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : text;
+}
+
+function addTemporalGeometryRow() {
+  if (!state.record) {
+    alert('Load a WMDR2 record before adding geolocation history.');
+    return;
+  }
+  syncFacilityForm();
+  syncItemForms();
+  const tg = ensureTemporalGeometry();
+  const current = state.record?.geometry?.coordinates;
+  const hasCurrent = Array.isArray(current) && current.length >= 2;
+  const newCoordinates = hasCurrent
+    ? current.slice(0, 3).map(value => Number.isFinite(Number(value)) ? Number(value) : value)
+    : [null, null, null];
+  tg.coordinates.push(newCoordinates);
+  tg.dates.push(state.record.time?.interval?.[0] || '..');
+  tg.methods.push([]);
+  const newIndex = tg.coordinates.length - 1;
+  state.selectedTemporalGeometryIndex = newIndex;
+  state.pendingScrollTarget = temporalGeometryDomId(newIndex);
+  renderAll();
+}
+
+function ensureTemporalGeometry() {
+  const existing = state.record.temporalGeometry;
+  if (!existing || typeof existing !== 'object' || existing.type !== 'MovingPoint') {
+    state.record.temporalGeometry = { type: 'MovingPoint', coordinates: [], dates: [], methods: [] };
+  }
+  const tg = state.record.temporalGeometry;
+  tg.type = 'MovingPoint';
+  if (!Array.isArray(tg.coordinates)) tg.coordinates = [];
+  if (!Array.isArray(tg.dates)) tg.dates = [];
+  if (!Array.isArray(tg.methods)) tg.methods = [];
+  return tg;
+}
+
+function deleteTemporalGeometryRow(index) {
+  syncFacilityForm();
+  const tg = state.record.temporalGeometry;
+  if (!tg) return;
+  tg.coordinates = asArray(tg.coordinates);
+  tg.dates = asArray(tg.dates);
+  tg.methods = asArray(tg.methods);
+  tg.coordinates.splice(index, 1);
+  tg.dates.splice(index, 1);
+  tg.methods.splice(index, 1);
+  if (!tg.coordinates.length && !tg.dates.length && !tg.methods.length) {
+    delete state.record.temporalGeometry;
+    state.selectedTemporalGeometryIndex = null;
+  } else {
+    updateCurrentGeometryFromLatestTemporalGeometry();
+    if (state.selectedTemporalGeometryIndex !== null) {
+      state.selectedTemporalGeometryIndex = Math.min(state.selectedTemporalGeometryIndex, tg.coordinates.length - 1);
+    }
+  }
+  renderAll();
 }
 
 function renderObservationSeries() {
   const series = asArray(props().observationSeries);
   $('observationCount').textContent = series.length;
   $('observationsList').innerHTML = series.map((obs, index) => itemHtml(
-    obs.id || `observationSeries:${index + 1}`,
+    observationSeriesHeaderTitle(obs, index),
     observationSeriesFormHtml(obs, index),
     'observationSeries',
     index,
   )).join('') || '<p class="muted">No ObservationSeries yet.</p>';
 }
 
+function observationSeriesHeaderTitle(obs, index) {
+  const id = entityId(obs) || `observationSeries:${index + 1}`;
+  const title = String(obs.title || '').trim();
+  return title ? `${id} [${title}]` : id;
+}
+
 function observationSeriesFormHtml(obs, index) {
   return `
-    <div class="item-form" data-kind="observationSeries" data-index="${index}">
-      <label>ID <input data-field="id" value="${escapeAttr(obs.id || '')}" /></label>
-      <label>Observed property <input data-field="observedProperty" value="${escapeAttr(obs.observedProperty ?? '')}" /></label>
-      <label class="wide">Title <input data-field="title" value="${escapeAttr(obs.title || '')}" /></label>
-      <label>Domain <input data-field="observedFeature.domain" value="${escapeAttr(obs.observedFeature?.domain ?? '')}" /></label>
-      <label>Observed geometry <input data-field="observedGeometry" value="${escapeAttr(obs.observedGeometry ?? '')}" /></label>
-      <label>Domain feature <input data-field="observedFeature.domainFeature" value="${escapeAttr(obs.observedFeature?.domainFeature ?? '')}" /></label>
-      <label>Feature name <input data-field="observedFeature.featureName" value="${escapeAttr(obs.observedFeature?.featureName ?? '')}" /></label>
-      <label class="wide">Program affiliations, comma-separated <input data-field="programAffiliation" value="${escapeAttr(asArray(obs.programAffiliation).join(', '))}" /></label>
+    <div class="item-form observation-form" data-kind="observationSeries" data-index="${index}">
+      <div class="observation-row two">
+        <label>Observed property <input data-field="observedProperty" value="${escapeAttr(obs.observedProperty ?? '')}" /></label>
+        <label>Observed geometry <input data-field="observedGeometry" value="${escapeAttr(obs.observedGeometry ?? '')}" /></label>
+      </div>
+      <div class="observation-row three">
+        <label>Domain <input data-field="observedFeature.domain" value="${escapeAttr(obs.observedFeature?.domain ?? '')}" /></label>
+        <label>Domain feature <input data-field="observedFeature.domainFeature" value="${escapeAttr(obs.observedFeature?.domainFeature ?? '')}" /></label>
+        <label>Feature name <input data-field="observedFeature.featureName" value="${escapeAttr(obs.observedFeature?.featureName ?? '')}" /></label>
+      </div>
+      <div class="observation-row two">
+        <label>Program affiliations, comma-separated <input data-field="programAffiliations" value="${escapeAttr(asArray(obs.programAffiliations).join(', '))}" /></label>
+        <label>Application areas, comma-separated <input data-field="applicationAreas" value="${escapeAttr(asArray(obs.applicationAreas).join(', '))}" /></label>
+      </div>
     </div>
-    ${observationDeploymentLinksHtml(obs)}
-    ${observationContactLinksHtml(obs)}`;
+    ${observationConfigurationLinksHtml(obs, index)}
+    ${observationInstrumentLinksHtml(obs)}
+    ${observationContactLinksHtml(obs)}
+    <div class="actions section-actions">
+      <button type="button" data-add-config="${index}">Add observing configuration</button>
+      <button type="button" data-add-observation-instrument="${index}">Add linked instrument</button>
+    </div>`;
 }
 
-function observationDeploymentRefs(obs) {
-  return [...new Set(asArray(obs.observingConfigurations).map(c => c?.deployment).filter(Boolean))];
+function observationConfigurations(obs) {
+  return asArray(obs.observingConfigurations);
 }
 
-function renderDeployments() {
-  const deployments = asArray(props().deployments);
-  $('deploymentCount').textContent = deployments.length;
-  $('deploymentsList').innerHTML = deployments.map((dep, index) => itemHtml(
-    dep.id || `deployment:${index + 1}`,
-    deploymentFormHtml(dep, index),
-    'deployment',
-    index,
-  )).join('') || '<p class="muted">No deployments yet.</p>';
+function flattenConfigurations() {
+  return asArray(props().observationSeries).flatMap((obs, seriesIndex) =>
+    observationConfigurations(obs).map((config, configIndex) => ({ obs, config, seriesIndex, configIndex }))
+  );
 }
 
-function deploymentFormHtml(dep, index) {
+function configurationDomId(seriesIndex, configIndex) {
+  return `configuration-${seriesIndex}-${configIndex}`;
+}
+
+function observationInstrumentRefs(obs) {
+  return [...new Set(observationConfigurations(obs).map(c => c?.instrument).filter(Boolean))];
+}
+
+function observationConfigurationLinksHtml(obs, index) {
+  const links = observationConfigurations(obs).map((config, configIndex) => {
+    const label = configLabel(config, configIndex);
+    return `<a class="xref" href="#${configurationDomId(index, configIndex)}" data-scroll-target="${configurationDomId(index, configIndex)}">${escapeHtml(label)}</a>`;
+  });
+  return xrefRow('Observing configurations', links, 'No observingConfigurations');
+}
+
+function observationInstrumentLinksHtml(obs) {
+  const instrumentIndex = indexByUid('instrument');
+  const links = observationInstrumentRefs(obs).map(ref => linkToItem('instrument', instrumentIndex.get(ref), ref));
+  return xrefRow('Linked instruments', links, 'No instrument refs in observingConfigurations');
+}
+
+function renderConfigurationsOverview() {
+  const configs = flattenConfigurations();
+  $('configurationCount').textContent = configs.length;
+  $('configurationsList').innerHTML = configs.map(({ obs, config, seriesIndex, configIndex }) => configurationItemHtml(obs, config, seriesIndex, configIndex)).join('') || '<p class="muted">No observing configurations yet.</p>';
+}
+
+function configurationItemHtml(obs, config, seriesIndex, configIndex) {
+  const domId = configurationDomId(seriesIndex, configIndex);
   return `
-    <div class="item-form" data-kind="deployment" data-index="${index}">
-      <label>ID <input data-field="id" value="${escapeAttr(dep.id || '')}" /></label>
-      <label>Source of observation <input data-field="sourceOfObservation" value="${escapeAttr(dep.sourceOfObservation ?? '')}" /></label>
-      <label>Reference surface <input data-field="referenceSurface" value="${escapeAttr(dep.referenceSurface ?? '')}" /></label>
-      <label>Height value <input data-field="verticalDistanceFromReferenceSurface.value" value="${escapeAttr(dep.verticalDistanceFromReferenceSurface?.value ?? '')}" /></label>
-      <label>Height uom <input data-field="verticalDistanceFromReferenceSurface.uom" value="${escapeAttr(dep.verticalDistanceFromReferenceSurface?.uom ?? '')}" /></label>
-      <label class="wide">Serial number <input data-field="serialNumber" value="${escapeAttr(dep.serialNumber || '')}" /></label>
-    </div>
-    ${deploymentCrossLinksHtml(dep)}`;
+    <article class="item" id="${domId}" data-item-kind="observingConfiguration" data-series-index="${seriesIndex}" data-config-index="${configIndex}">
+      <div class="item-header">
+        <div class="item-title">${escapeHtml(configLabel(config, configIndex))}</div>
+        <div class="actions">
+          <button data-json-config="${seriesIndex}:${configIndex}" type="button">Edit JSON</button>
+          <button data-delete-config="${seriesIndex}:${configIndex}" type="button">Delete</button>
+        </div>
+      </div>
+      ${configurationFormHtml(config, seriesIndex, configIndex)}
+      ${configurationCrossLinksHtml(obs, config, seriesIndex)}
+    </article>`;
+}
+
+function configLabel(config, index) {
+  const method = displayCompact(config.observingMethod);
+  const instr = config.instrument ? `; ${config.instrument}` : '';
+  return `${configStart(config) || 'missing start'}; method ${method || '?'}${instr}` || `Configuration ${index + 1}`;
+}
+
+function configurationFormHtml(config, seriesIndex, configIndex) {
+  return `
+    <div class="item-form" data-kind="observingConfiguration" data-series-index="${seriesIndex}" data-config-index="${configIndex}">
+      <label>Begin <input data-field="time.interval.0" placeholder="YYYY-MM-DD or .." value="${escapeAttr(configStart(config))}" /></label>
+      <label>End <input data-field="time.interval.1" placeholder="YYYY-MM-DD or .." value="${escapeAttr(configEnd(config))}" /></label>
+      <label>Observing method <input data-field="observingMethod" value="${escapeAttr(inputValue(config.observingMethod))}" /></label>
+      <label>Operating status <input data-field="operatingStatus" value="${escapeAttr(inputValue(config.operatingStatus))}" /></label>
+      <label>Source of observation <input data-field="sourceOfObservation" value="${escapeAttr(inputValue(config.sourceOfObservation))}" /></label>
+      <label>Instrument ID <input data-field="instrument" value="${escapeAttr(config.instrument || '')}" /></label>
+      <label>Serial number <input data-field="serialNumber" value="${escapeAttr(config.serialNumber || '')}" /></label>
+      <label>Exposure <input data-field="exposure" value="${escapeAttr(config.exposure ?? '')}" /></label>
+      <label>Reference surface <input data-field="referenceSurface" value="${escapeAttr(config.referenceSurface ?? '')}" /></label>
+      <label>Relative location <input data-field="relativeLocation" value="${escapeAttr(config.relativeLocation ?? '')}" /></label>
+      <label>Vertical distance value <input data-field="verticalDistanceFromReferenceSurface.value" value="${escapeAttr(config.verticalDistanceFromReferenceSurface?.value ?? '')}" /></label>
+      <label>Vertical distance uom <input data-field="verticalDistanceFromReferenceSurface.uom" value="${escapeAttr(config.verticalDistanceFromReferenceSurface?.uom ?? '')}" /></label>
+    </div>`;
+}
+
+function configurationCrossLinksHtml(obs, config, seriesIndex) {
+  const instrumentIndex = indexByUid('instrument');
+  const obsLink = linkToItem('observationSeries', seriesIndex, entityId(obs) || obs.title || `ObservationSeries ${seriesIndex + 1}`);
+  const instrumentLinks = config.instrument ? [linkToItem('instrument', instrumentIndex.get(config.instrument), config.instrument)] : [];
+  return `${xrefRow('Belongs to', [obsLink], 'No ObservationSeries')}${xrefRow('Linked instrument', instrumentLinks, 'No instrument ref')}`;
 }
 
 function renderInstruments() {
   const instruments = asArray(props().instruments);
   $('instrumentCount').textContent = instruments.length;
   $('instrumentsList').innerHTML = instruments.map((inst, index) => itemHtml(
-    inst.id || `instrument:${index + 1}`,
+    entityId(inst) || `instrument:${index + 1}`,
     instrumentFormHtml(inst, index),
     'instrument',
     index,
@@ -281,7 +577,7 @@ function renderInstruments() {
 function instrumentFormHtml(inst, index) {
   return `
     <div class="item-form" data-kind="instrument" data-index="${index}">
-      <label>ID <input data-field="id" value="${escapeAttr(inst.id || '')}" /></label>
+      <label>ID <input data-field="id" value="${escapeAttr(entityId(inst))}" /></label>
       <label>Title <input data-field="title" value="${escapeAttr(inst.title || '')}" /></label>
       <label>Manufacturer <input data-field="manufacturer" value="${escapeAttr(inst.manufacturer || '')}" /></label>
       <label>Model <input data-field="model" value="${escapeAttr(inst.model || '')}" /></label>
@@ -301,7 +597,7 @@ function itemHtml(title, formHtml, kind, index) {
       <div class="item-header">
         <div class="item-title">${escapeHtml(title)}</div>
         <div class="actions">
-          <button data-json-item="${kind}" data-index="${index}" type="button">JSON</button>
+          <button data-json-item="${kind}" data-index="${index}" type="button">Edit JSON</button>
           <button data-delete-item="${kind}" data-index="${index}" type="button">Delete</button>
         </div>
       </div>
@@ -309,8 +605,21 @@ function itemHtml(title, formHtml, kind, index) {
     </article>`;
 }
 
-function indexById(kind) {
-  return new Map(getSectionForKind(kind).map((item, index) => [item?.id, index]).filter(([id]) => Boolean(id)));
+
+function entityId(item) {
+  return item?.id || item?.uid || item?.identifier || '';
+}
+
+function configStart(config) {
+  return config?.time?.interval?.[0] ?? config?.validFrom ?? '';
+}
+
+function configEnd(config) {
+  return config?.time?.interval?.[1] ?? '..';
+}
+
+function indexByUid(kind) {
+  return new Map(getSectionForKind(kind).map((item, index) => [entityId(item), index]).filter(([id]) => Boolean(id)));
 }
 
 function linkToItem(kind, index, label) {
@@ -331,7 +640,7 @@ function normalizeRole(role) {
 }
 
 function contactLabel(contact, index) {
-  return contact.name || contact.organization || contact.id || `Contact ${index + 1}`;
+  return contact.name || contact.organization || entityId(contact) || `Contact ${index + 1}`;
 }
 
 function contactsWithRole(role) {
@@ -368,8 +677,10 @@ function renderFacilityContactLinks() {
 }
 
 function facilityContactLinksHtml() {
-  const ownerLinks = contactsWithRole('owner').map(({ contact, index }) => contactLink(contact, index));
-  return xrefRow('Owner contacts', ownerLinks, 'No contact has role owner');
+  const ownerContacts = contactsWithRole('owner');
+  const ownerLinks = ownerContacts.map(({ contact, index }) => contactLink(contact, index));
+  const buttonLabel = ownerContacts.length === 1 ? 'Edit owner contact' : (ownerContacts.length > 1 ? 'Edit owner contacts' : 'Add owner contact');
+  return `${xrefRow('Owner contacts', ownerLinks, 'No contact has role owner')}<div class="actions section-actions inline-actions"><button type="button" data-open-owner-contact>${escapeHtml(buttonLabel)}</button></div>`;
 }
 
 function observationContactLinksHtml(_obs) {
@@ -380,51 +691,28 @@ function observationContactLinksHtml(_obs) {
   return xrefRow('Contacts by role', links, 'No non-owner contact roles available');
 }
 
-function observationDeploymentLinksHtml(obs) {
-  const deploymentIndex = indexById('deployment');
-  const links = observationDeploymentRefs(obs).map(ref => linkToItem('deployment', deploymentIndex.get(ref), ref));
-  return xrefRow('Linked deployments', links, 'No deployment refs in observingConfigurations');
-}
-
-function observationsUsingDeployment(deploymentId) {
-  if (!deploymentId) return [];
-  return asArray(props().observationSeries)
-    .map((obs, index) => ({ obs, index }))
-    .filter(({ obs }) => observationDeploymentRefs(obs).includes(deploymentId));
-}
-
-function deploymentsUsingInstrument(instrumentId) {
-  if (!instrumentId) return [];
-  return asArray(props().deployments)
-    .map((deployment, index) => ({ deployment, index }))
-    .filter(({ deployment }) => deployment?.instrument === instrumentId);
-}
-
-function deploymentCrossLinksHtml(dep) {
-  const instrumentIndex = indexById('instrument');
-  const instrumentLinks = dep.instrument
-    ? [linkToItem('instrument', instrumentIndex.get(dep.instrument), dep.instrument)]
-    : [];
-  const observationLinks = observationsUsingDeployment(dep.id).map(({ obs, index }) =>
-    linkToItem('observationSeries', index, obs.id || obs.title || `ObservationSeries ${index + 1}`)
-  );
-  return `
-    ${xrefRow('Linked instrument', instrumentLinks, 'No instrument ref')}
-    ${xrefRow('Referred from ObservationSeries', observationLinks, 'No ObservationSeries refers to this deployment')}`;
+function configsUsingInstrument(instrumentUid) {
+  if (!instrumentUid) return [];
+  return flattenConfigurations().filter(({ config }) => config?.instrument === instrumentUid);
 }
 
 function instrumentCrossLinksHtml(inst) {
-  const deploymentLinks = deploymentsUsingInstrument(inst.id).map(({ deployment, index }) =>
-    linkToItem('deployment', index, deployment.id || `Deployment ${index + 1}`)
+  const configs = configsUsingInstrument(entityId(inst));
+  const configLinks = configs.map(({ config, seriesIndex, configIndex }) =>
+    `<a class="xref" href="#${configurationDomId(seriesIndex, configIndex)}" data-scroll-target="${configurationDomId(seriesIndex, configIndex)}">${escapeHtml(configLabel(config, configIndex))}</a>`
   );
-  return xrefRow('Used by deployments', deploymentLinks, 'No deployment uses this instrument');
+  const seenSeries = new Set();
+  const seriesLinks = configs
+    .filter(({ seriesIndex }) => !seenSeries.has(seriesIndex) && seenSeries.add(seriesIndex))
+    .map(({ obs, seriesIndex }) => linkToItem('observationSeries', seriesIndex, entityId(obs) || obs.title || `ObservationSeries ${seriesIndex + 1}`));
+  return `${xrefRow('Used by configurations', configLinks, 'No observing configuration uses this instrument')}${xrefRow('Used by ObservationSeries', seriesLinks, 'No ObservationSeries uses this instrument')}`;
 }
 
 function renderContacts() {
   const contacts = asArray(props().contacts);
   $('contactCount').textContent = contacts.length;
   $('contactsList').innerHTML = contacts.map((contact, index) => itemHtml(
-    contact.name || contact.organization || contact.id || `contact:${index + 1}`,
+    contactLabel(contact, index),
     contactFormHtml(contact, index),
     'contact',
     index,
@@ -434,7 +722,7 @@ function renderContacts() {
 function contactFormHtml(contact, index) {
   return `
     <div class="item-form" data-kind="contact" data-index="${index}">
-      <label>ID <input data-field="id" value="${escapeAttr(contact.id || '')}" /></label>
+      <label>Identifier <input data-field="identifier" value="${escapeAttr(entityId(contact))}" /></label>
       <label>Name <input data-field="name" value="${escapeAttr(contact.name || '')}" /></label>
       <label>Organization <input data-field="organization" value="${escapeAttr(contact.organization || '')}" /></label>
       <label>Position <input data-field="position" value="${escapeAttr(contact.position || '')}" /></label>
@@ -458,17 +746,23 @@ function contactCrossLinksHtml(contact) {
 }
 
 function syncItemForms() {
-  document.querySelectorAll('[data-kind]').forEach(form => {
+  document.querySelectorAll('[data-kind="observationSeries"], [data-kind="instrument"], [data-kind="contact"]').forEach(form => {
     const kind = form.dataset.kind;
     const index = Number(form.dataset.index);
     const target = getSectionForKind(kind)[index];
     if (!target) return;
     form.querySelectorAll('[data-field]').forEach(input => {
-      if (input.dataset.field === 'configurationDeployments') {
-        setObservationDeploymentRefs(target, splitValues(input.value));
-      } else {
-        setField(target, input.dataset.field, coerceField(input.dataset.field, input.value));
-      }
+      setField(target, input.dataset.field, coerceField(input.dataset.field, input.value));
+    });
+  });
+
+  document.querySelectorAll('[data-kind="observingConfiguration"]').forEach(form => {
+    const seriesIndex = Number(form.dataset.seriesIndex);
+    const configIndex = Number(form.dataset.configIndex);
+    const target = props().observationSeries?.[seriesIndex]?.observingConfigurations?.[configIndex];
+    if (!target) return;
+    form.querySelectorAll('[data-field]').forEach(input => {
+      setField(target, input.dataset.field, coerceField(input.dataset.field, input.value));
     });
   });
 }
@@ -476,25 +770,9 @@ function syncItemForms() {
 function getSectionForKind(kind) {
   const p = props();
   if (kind === 'observationSeries') return p.observationSeries ??= [];
-  if (kind === 'deployment') return p.deployments ??= [];
   if (kind === 'instrument') return p.instruments ??= [];
   if (kind === 'contact') return p.contacts ??= [];
   throw new Error(`Unknown item type ${kind}`);
-}
-
-function setObservationDeploymentRefs(obs, refs) {
-  const existing = asArray(obs.observingConfigurations);
-  const currentRefs = observationDeploymentRefs(obs);
-  if (refs.join('|') === currentRefs.join('|')) return;
-  obs.observingConfigurations = refs.map((deployment, index) => {
-    const existingConfig = existing.find(c => c?.deployment === deployment) || existing[index] || {};
-    return {
-      date: existingConfig.date || '..',
-      deployment,
-      observingMethod: existingConfig.observingMethod ?? { nilReason: 'unknown' },
-      ...omit(existingConfig, ['deployment']),
-    };
-  });
 }
 
 function setField(obj, path, value) {
@@ -502,10 +780,22 @@ function setField(obj, path, value) {
   let target = obj;
   while (parts.length > 1) {
     const key = parts.shift();
-    target[key] ??= {};
-    target = target[key];
+    const nextKey = parts[0];
+    const shouldBeArray = /^\d+$/.test(nextKey);
+    if (Array.isArray(target)) {
+      const index = Number(key);
+      target[index] ??= shouldBeArray ? [] : {};
+      target = target[index];
+    } else {
+      target[key] ??= shouldBeArray ? [] : {};
+      target = target[key];
+    }
   }
   const finalKey = parts[0];
+  if (Array.isArray(target) && /^\d+$/.test(finalKey)) {
+    target[Number(finalKey)] = value;
+    return;
+  }
   if (value === '' || (Array.isArray(value) && !value.length)) {
     delete target[finalKey];
   } else {
@@ -515,20 +805,29 @@ function setField(obj, path, value) {
 
 function coerceField(field, value) {
   const trimmed = String(value ?? '').trim();
-  if (['programAffiliation', 'observingMethods', 'roles'].includes(field)) {
+  if (field === 'time.interval.0' || field === 'time.interval.1') return trimmed || '..';
+  if (['programAffiliations', 'applicationAreas', 'observingMethods', 'roles'].includes(field)) {
     return splitValues(trimmed).map(valueOrNumber);
   }
   if (['emails', 'phones'].includes(field)) {
     return splitValues(trimmed);
   }
-  if (['observedProperty', 'observedGeometry', 'sourceOfObservation'].includes(field) || field.endsWith('.domain') || field.endsWith('.value')) {
-    return valueOrNumber(trimmed);
+  if (['observedProperty', 'observedGeometry', 'observingMethod', 'operatingStatus', 'sourceOfObservation', 'exposure'].includes(field) || field.endsWith('.domain') || field.endsWith('.value')) {
+    return valueOrJsonOrNumber(trimmed);
   }
   return trimmed;
 }
 
 function splitValues(value) {
   return value ? value.split(',').map(part => part.trim()).filter(Boolean) : [];
+}
+
+function valueOrJsonOrNumber(value) {
+  if (value === '') return '';
+  if (value.startsWith('{') || value.startsWith('[')) {
+    try { return JSON.parse(value); } catch { return value; }
+  }
+  return valueOrNumber(value);
 }
 
 function valueOrNumber(value) {
@@ -543,15 +842,241 @@ function numberOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function inputValue(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function displayCompact(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'object') return value.nilReason ? `nil:${value.nilReason}` : JSON.stringify(value);
+  return String(value);
+}
+
+
+
+function defaultSaveFileName() {
+  const base = state.record?.id || 'record';
+  return `${safeFileNamePart(base)}.json`;
+}
+
+function safeFileNamePart(value) {
+  return String(value || 'record').replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^[._]+|[._]+$/g, '') || 'record';
+}
+
+function openSaveDialog() {
+  if (!state.record) return;
+  syncFacilityForm();
+  syncItemForms();
+  $('saveLocationInput').value = state.saveLocation || 'data/records';
+  $('saveFileNameInput').value = state.sourceFilename || defaultSaveFileName();
+  const result = $('saveResult');
+  result.className = 'validation empty';
+  result.textContent = 'Ready to save.';
+  $('saveModal').showModal();
+}
+
+async function saveAsFromDialog() {
+  if (!state.record) return;
+  syncFacilityForm();
+  syncItemForms();
+  const location = $('saveLocationInput').value.trim() || 'data/records';
+  const filename = $('saveFileNameInput').value.trim() || defaultSaveFileName();
+  const resultPanel = $('saveResult');
+  resultPanel.className = 'validation empty';
+  resultPanel.textContent = 'Saving…';
+  try {
+    const result = await api(`/api/records/${encodeURIComponent(state.recordId || state.record.id)}/save-as`, {
+      method: 'POST',
+      body: JSON.stringify({ record: state.record, location, filename }),
+    });
+    state.record = result.record;
+    state.recordId = result.id;
+    state.validation = result.validation;
+    state.sourceFilename = result.filename || filename;
+    state.saveLocation = result.location || location;
+    renderAll();
+    resultPanel.className = 'validation valid save-success';
+    resultPanel.innerHTML = `Saved to <code>${escapeHtml(result.saved_as || filename)}</code>.`;
+  } catch (error) {
+    resultPanel.className = 'validation invalid';
+    resultPanel.textContent = error.message;
+  }
+}
+
+function configurationsSectionJson() {
+  return asArray(props().observationSeries).map((obs, index) => ({
+    observationSeries: entityId(obs) || index,
+    observingConfigurations: asArray(obs.observingConfigurations),
+  }));
+}
+
+function applyConfigurationsSectionJson(value) {
+  const entries = ensureArray(value, 'observing configurations');
+  const series = asArray(props().observationSeries);
+  entries.forEach((entry, index) => {
+    const targetIndex = findObservationSeriesIndexForConfigurationEntry(entry, index);
+    if (targetIndex >= 0 && series[targetIndex]) {
+      series[targetIndex].observingConfigurations = ensureArray(entry.observingConfigurations ?? [], 'observingConfigurations');
+    }
+  });
+}
+
+function findObservationSeriesIndexForConfigurationEntry(entry, fallbackIndex) {
+  const key = entry?.observationSeries;
+  if (key) {
+    const found = asArray(props().observationSeries).findIndex(obs => entityId(obs) === key);
+    if (found >= 0) return found;
+  }
+  return Number.isInteger(fallbackIndex) ? fallbackIndex : -1;
+}
+
+function uniqueUid(prefix, existingUids) {
+  let next = existingUids.size + 1;
+  let uid = `${prefix}:new-${next}`;
+  while (existingUids.has(uid)) {
+    next += 1;
+    uid = `${prefix}:new-${next}`;
+  }
+  return uid;
+}
+
+function openOwnerContactModal() {
+  syncFacilityForm();
+  syncItemForms();
+  const contacts = props().contacts ??= [];
+  const owners = contactsWithRole('owner');
+  const select = $('ownerContactSelect');
+  if (!select) return;
+  $('ownerContactModalTitle').textContent = owners.length === 1 ? 'Edit owner contact' : (owners.length > 1 ? 'Edit owner contacts' : 'Add owner contact');
+  $('ownerContactModalHelp').textContent = owners.length
+    ? 'Review the current owner contact, assign another existing contact as owner, or create a new owner contact.'
+    : 'No owner contact is assigned. Choose an existing contact or create a new contact with role owner.';
+  select.innerHTML = contacts.map((contact, index) => {
+    const selected = owners.length === 1 && owners[0].index === index ? ' selected' : '';
+    const roles = asArray(contact.roles).join(', ');
+    const roleText = roles ? ` (${roles})` : '';
+    return `<option value="${index}"${selected}>${escapeHtml(contactLabel(contact, index) + roleText)}</option>`;
+  }).join('') || '<option value="">No contacts available</option>';
+  $('ownerContactJumpBtn').disabled = contacts.length === 0;
+  $('ownerContactAssignBtn').disabled = contacts.length === 0;
+  $('ownerContactModal').showModal();
+}
+
+function selectedOwnerContactIndex() {
+  const value = $('ownerContactSelect')?.value;
+  if (value === undefined || value === '') return -1;
+  const index = Number(value);
+  return Number.isInteger(index) ? index : -1;
+}
+
+function ensureContactRole(contact, role) {
+  contact.roles = asArray(contact.roles).map(String).filter(Boolean);
+  if (!contact.roles.map(normalizeRole).includes(normalizeRole(role))) {
+    contact.roles.push(role);
+  }
+}
+
+function assignSelectedOwnerContact() {
+  const index = selectedOwnerContactIndex();
+  const contact = props().contacts?.[index];
+  if (!contact) return;
+  ensureContactRole(contact, 'owner');
+  $('ownerContactModal').close();
+  state.pendingScrollTarget = itemDomId('contact', index);
+  renderAll();
+}
+
+function jumpToSelectedOwnerContact() {
+  const index = selectedOwnerContactIndex();
+  if (index < 0) return;
+  $('ownerContactModal').close();
+  scrollToItem(itemDomId('contact', index));
+}
+
+function addOwnerContact() {
+  syncFacilityForm();
+  syncItemForms();
+  const contacts = props().contacts ??= [];
+  const uid = uniqueUid('contact', new Set(contacts.map(entityId).filter(Boolean)));
+  contacts.push({
+    identifier: uid,
+    name: '',
+    organization: '',
+    roles: ['owner'],
+    emails: [],
+    phones: [],
+  });
+  $('ownerContactModal')?.close();
+  state.pendingScrollTarget = itemDomId('contact', contacts.length - 1);
+  renderAll();
+}
+
+function addInstrumentForObservationSeries(seriesIndex) {
+  syncFacilityForm();
+  syncItemForms();
+  const obs = props().observationSeries?.[seriesIndex];
+  if (!obs) return;
+
+  const instruments = props().instruments ??= [];
+  const uid = uniqueUid('instrument', new Set(instruments.map(entityId).filter(Boolean)));
+  const configs = obs.observingConfigurations ??= [];
+  let configIndex = configs.findIndex(config => !config?.instrument);
+  if (configIndex < 0) {
+    configs.push({
+      time: { interval: ['..', '..'] },
+      observingMethod: { nilReason: 'unknown' },
+    });
+    configIndex = configs.length - 1;
+  }
+  const config = configs[configIndex];
+  config.instrument = uid;
+
+  const observingMethods = [];
+  if (config.observingMethod !== undefined && config.observingMethod !== '' && typeof config.observingMethod !== 'object') {
+    observingMethods.push(config.observingMethod);
+  }
+  instruments.push({
+    id: uid,
+    title: '',
+    manufacturer: '',
+    model: '',
+    observingMethods,
+  });
+
+  state.pendingScrollTarget = itemDomId('instrument', instruments.length - 1);
+  renderAll();
+}
+
 function addItem(kind) {
   syncFacilityForm();
   syncItemForms();
   const section = getSectionForKind(kind);
   const next = section.length + 1;
-  if (kind === 'observationSeries') section.push({ id: `observationSeries:new-${next}`, observedProperty: '', observedFeature: {} });
-  if (kind === 'deployment') section.push({ id: `deployment:new-${next}` });
-  if (kind === 'instrument') section.push({ id: `instrument:new-${next}` });
-  if (kind === 'contact') section.push({ roles: [], emails: [] });
+  if (kind === 'observationSeries') section.push({
+    id: `observationSeries:new-${next}`,
+    observedProperty: '',
+    observedFeature: { domain: '' },
+    applicationAreas: [],
+    observingConfigurations: [],
+  });
+  if (kind === 'instrument') section.push({ id: uniqueUid('instrument', new Set(section.map(entityId).filter(Boolean))) });
+  if (kind === 'contact') section.push({ identifier: uniqueUid('contact', new Set(section.map(entityId).filter(Boolean))), roles: [], emails: [] });
+  renderAll();
+}
+
+function addConfiguration(seriesIndex) {
+  syncFacilityForm();
+  syncItemForms();
+  const obs = props().observationSeries?.[seriesIndex];
+  if (!obs) return;
+  obs.observingConfigurations ??= [];
+  obs.observingConfigurations.push({
+    time: { interval: ['..', '..'] },
+    observingMethod: { nilReason: 'unknown' },
+  });
+  state.pendingScrollTarget = configurationDomId(seriesIndex, obs.observingConfigurations.length - 1);
   renderAll();
 }
 
@@ -562,6 +1087,13 @@ function deleteItem(kind, index) {
   renderAll();
 }
 
+function deleteConfiguration(seriesIndex, configIndex) {
+  syncFacilityForm();
+  syncItemForms();
+  props().observationSeries?.[seriesIndex]?.observingConfigurations?.splice(configIndex, 1);
+  renderAll();
+}
+
 function openModal(target, title, value) {
   state.modalTarget = target;
   $('modalTitle').textContent = title;
@@ -569,11 +1101,25 @@ function openModal(target, title, value) {
   $('jsonModal').showModal();
 }
 
+function focusSection(sectionId, options = {}) {
+  const { scroll = true } = options;
+  TOP_LEVEL_SECTION_IDS.forEach(id => {
+    const section = $(id);
+    if (section) section.open = id === sectionId;
+  });
+  const section = $(sectionId);
+  if (section && scroll) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function scrollToItem(targetId) {
   const target = $(targetId);
   if (!target) return;
-  const details = target.closest('details');
-  if (details) details.open = true;
+  const topLevelDetails = target.matches('details.card') ? target : target.closest('details.card');
+  if (topLevelDetails?.id) focusSection(topLevelDetails.id, { scroll: false });
+  else {
+    const details = target.closest('details');
+    if (details) details.open = true;
+  }
   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   target.classList.add('flash');
   window.setTimeout(() => target.classList.remove('flash'), 1600);
@@ -582,7 +1128,7 @@ function scrollToItem(targetId) {
 function refreshRelationshipViews() {
   renderFacility();
   renderObservationSeries();
-  renderDeployments();
+  renderConfigurationsOverview();
   renderInstruments();
   renderContacts();
   $('recordRaw').value = pretty(state.record);
@@ -593,14 +1139,17 @@ function applyModal() {
   const target = state.modalTarget;
   if (target === 'facilityRaw') {
     Object.assign(state.record, pick(value, ['id', 'geometry', 'temporalGeometry', 'time', 'conformsTo']));
-    Object.assign(props(), omit(value.properties ? value.properties : value, ['observationSeries', 'deployments', 'instruments', 'contacts', 'schedules', 'reporting']));
+    Object.assign(props(), omit(value.properties ? value.properties : value, ['observationSeries', 'instruments', 'contacts', 'schedules']));
   } else if (target === 'observationSeriesRaw') props().observationSeries = ensureArray(value, 'observationSeries');
-  else if (target === 'deploymentsRaw') props().deployments = ensureArray(value, 'deployments');
+  else if (target === 'configurationsRaw') applyConfigurationsSectionJson(value);
   else if (target === 'instrumentsRaw') props().instruments = ensureArray(value, 'instruments');
   else if (target === 'contactsRaw') props().contacts = ensureArray(value, 'contacts');
   else if (target?.startsWith('item:')) {
     const [, kind, indexText] = target.split(':');
     getSectionForKind(kind)[Number(indexText)] = value;
+  } else if (target?.startsWith('config:')) {
+    const [, seriesText, configText] = target.split(':');
+    props().observationSeries[Number(seriesText)].observingConfigurations[Number(configText)] = value;
   }
   $('jsonModal').close();
   renderAll();
@@ -643,10 +1192,7 @@ $('fileInput').addEventListener('change', async event => {
     const form = new FormData();
     form.append('file', file);
     const result = await api('/api/records', { method: 'POST', body: form });
-    state.record = result.record;
-    state.recordId = result.id;
-    state.validation = result.validation;
-    renderAll();
+    acceptLoadedRecord(result, file.name);
   } catch (error) {
     alert(error.message);
   }
@@ -661,7 +1207,7 @@ $('loadPasteBtn').addEventListener('click', async () => {
 });
 
 $('loadExampleBtn').addEventListener('click', () => loadRecord(exampleRecord).catch(error => alert(error.message)));
-$('saveBtn').addEventListener('click', () => saveFullRecord().catch(error => alert(error.message)));
+$('saveBtn').addEventListener('click', () => openSaveDialog());
 $('validateBtn').addEventListener('click', () => validateRecord().catch(error => alert(error.message)));
 $('applyRawBtn').addEventListener('click', () => {
   try {
@@ -673,19 +1219,67 @@ $('applyRawBtn').addEventListener('click', () => {
   }
 });
 $('addObservationBtn').addEventListener('click', () => addItem('observationSeries'));
-$('addDeploymentBtn').addEventListener('click', () => addItem('deployment'));
 $('addInstrumentBtn').addEventListener('click', () => addItem('instrument'));
 $('addContactBtn').addEventListener('click', () => addItem('contact'));
+$('addTemporalGeometryBtn').addEventListener('click', () => addTemporalGeometryRow());
 $('modalCancelBtn').addEventListener('click', () => $('jsonModal').close());
 $('modalApplyBtn').addEventListener('click', () => {
   try { applyModal(); } catch (error) { alert(error.message); }
 });
+$('saveCancelBtn').addEventListener('click', () => $('saveModal').close());
+$('saveConfirmBtn').addEventListener('click', () => saveAsFromDialog());
+$('ownerContactCancelBtn').addEventListener('click', () => $('ownerContactModal').close());
+$('ownerContactAssignBtn').addEventListener('click', () => assignSelectedOwnerContact());
+$('ownerContactJumpBtn').addEventListener('click', () => jumpToSelectedOwnerContact());
+$('ownerContactNewBtn').addEventListener('click', () => addOwnerContact());
+
+// Keep old development data from throwing if an old HTML is cached.
+const oldAddDeployment = $('addDeploymentBtn');
+if (oldAddDeployment) oldAddDeployment.addEventListener('click', () => alert('WMDR2 v0.3.x no longer has facility-level deployments. Use observingConfigurations instead.'));
 
 document.body.addEventListener('click', event => {
+  const summaryModalButton = event.target.closest('summary [data-open-modal]');
+  if (summaryModalButton) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   const xref = event.target.closest('[data-scroll-target]');
   if (xref) {
     event.preventDefault();
     scrollToItem(xref.dataset.scrollTarget);
+    return;
+  }
+
+  const ownerContactButton = event.target.closest('[data-open-owner-contact]');
+  if (ownerContactButton) {
+    openOwnerContactModal();
+    return;
+  }
+
+  const addObsInstrument = event.target.closest('[data-add-observation-instrument]');
+  if (addObsInstrument) {
+    addInstrumentForObservationSeries(Number(addObsInstrument.dataset.addObservationInstrument));
+    return;
+  }
+
+  const addConfig = event.target.closest('[data-add-config]');
+  if (addConfig) {
+    addConfiguration(Number(addConfig.dataset.addConfig));
+    return;
+  }
+
+  const selectTemporal = event.target.closest('[data-select-temporal-geometry]');
+  if (selectTemporal) {
+    syncFacilityForm();
+    state.selectedTemporalGeometryIndex = Number(selectTemporal.dataset.selectTemporalGeometry);
+    renderTemporalGeometryHistory();
+    return;
+  }
+
+  const deleteTemporal = event.target.closest('[data-delete-temporal-geometry]');
+  if (deleteTemporal) {
+    deleteTemporalGeometryRow(Number(deleteTemporal.dataset.deleteTemporalGeometry));
     return;
   }
 
@@ -696,17 +1290,24 @@ document.body.addEventListener('click', event => {
     syncItemForms();
     const target = open.dataset.openModal;
     const mapping = {
-      facilityRaw: ['Facility JSON', { id: state.record.id, geometry: state.record.geometry, temporalGeometry: state.record.temporalGeometry, time: state.record.time, conformsTo: state.record.conformsTo, properties: omit(props(), ['observationSeries', 'deployments', 'instruments', 'contacts', 'schedules', 'reporting']) }],
+      facilityRaw: ['Facility JSON', { id: state.record.id, geometry: state.record.geometry, temporalGeometry: state.record.temporalGeometry, time: state.record.time, conformsTo: state.record.conformsTo, properties: omit(props(), ['observationSeries', 'instruments', 'contacts', 'schedules']) }],
       observationSeriesRaw: ['ObservationSeries JSON', props().observationSeries ?? []],
-      deploymentsRaw: ['Deployments JSON', props().deployments ?? []],
+      configurationsRaw: ['Observing configurations JSON', configurationsSectionJson()],
       instrumentsRaw: ['Instruments JSON', props().instruments ?? []],
       contactsRaw: ['Contacts JSON', props().contacts ?? []],
     };
+    if (!mapping[target]) return;
     openModal(target, mapping[target][0], mapping[target][1]);
   }
 
   const deleteButton = event.target.closest('[data-delete-item]');
   if (deleteButton) deleteItem(deleteButton.dataset.deleteItem, Number(deleteButton.dataset.index));
+
+  const deleteConfigButton = event.target.closest('[data-delete-config]');
+  if (deleteConfigButton) {
+    const [seriesIndex, configIndex] = deleteConfigButton.dataset.deleteConfig.split(':').map(Number);
+    deleteConfiguration(seriesIndex, configIndex);
+  }
 
   const jsonButton = event.target.closest('[data-json-item]');
   if (jsonButton) {
@@ -715,6 +1316,14 @@ document.body.addEventListener('click', event => {
     const kind = jsonButton.dataset.jsonItem;
     const index = Number(jsonButton.dataset.index);
     openModal(`item:${kind}:${index}`, `${kind} JSON`, getSectionForKind(kind)[index]);
+  }
+
+  const jsonConfigButton = event.target.closest('[data-json-config]');
+  if (jsonConfigButton) {
+    syncFacilityForm();
+    syncItemForms();
+    const [seriesIndex, configIndex] = jsonConfigButton.dataset.jsonConfig.split(':').map(Number);
+    openModal(`config:${seriesIndex}:${configIndex}`, 'ObservingConfiguration JSON', props().observationSeries[seriesIndex].observingConfigurations[configIndex]);
   }
 });
 
@@ -734,7 +1343,7 @@ document.body.addEventListener('change', event => {
   if (!state.record) return;
   const field = event.target?.dataset?.field;
   if (!field) return;
-  if (['configurationDeployments', 'instrument', 'id', 'roles', 'name', 'organization'].includes(field)) {
+  if (['instrument', 'id', 'uid', 'identifier', 'roles', 'name', 'organization', 'time.interval.0', 'time.interval.1', 'observingMethod', 'date', 'lon', 'lat', 'elev', 'methods'].includes(field)) {
     syncFacilityForm();
     syncItemForms();
     refreshRelationshipViews();
