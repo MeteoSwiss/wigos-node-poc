@@ -23,6 +23,20 @@ const $ = (id) => document.getElementById(id);
 const asArray = (value) => Array.isArray(value) ? value : [];
 const pretty = (value) => JSON.stringify(value ?? null, null, 2);
 
+// Build browser URLs relative to the directory from which app.js was loaded.
+// This is important in hosted environments such as Renku, where the app is
+// served below a session-specific prefix instead of directly below /.
+const scriptElement = document.querySelector('script[src*="app.js"]');
+const appBaseUrl = new URL('..', scriptElement?.src || window.location.href);
+
+function appUrl(path) {
+  const value = String(path);
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+    return value;
+  }
+  return new URL(value.replace(/^\/+/, ''), appBaseUrl).toString();
+}
+
 const exampleRecord = {
   type: 'Feature',
   id: '0-20000-0-06725',
@@ -114,7 +128,7 @@ function parseJson(text, label = 'JSON') {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(appUrl(path), {
     headers: options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined,
     ...options,
   });
@@ -167,7 +181,7 @@ function renderAll() {
   $('validateBtn').disabled = false;
   $('downloadLink').classList.remove('disabled');
   $('downloadLink').setAttribute('aria-disabled', 'false');
-  $('downloadLink').href = `/api/records/${encodeURIComponent(state.record.id)}/download`;
+  $('downloadLink').href = appUrl(`api/records/${encodeURIComponent(state.record.id)}/download`);
   renderFacility();
   renderObservationSeries();
   renderConfigurationsOverview();
@@ -1335,7 +1349,7 @@ document.body.addEventListener('input', event => {
     $('recordRaw').value = pretty(state.record);
     $('recordTitle').textContent = props().title || state.record.id || 'Untitled facility';
     $('recordId').textContent = state.record.id || 'No id';
-    $('downloadLink').href = `/api/records/${encodeURIComponent(state.record.id)}/download`;
+    $('downloadLink').href = appUrl(`api/records/${encodeURIComponent(state.record.id)}/download`);
   }
 });
 

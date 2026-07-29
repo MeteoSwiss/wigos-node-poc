@@ -1,4 +1,4 @@
-# OSCAR nextGen Node PoC
+# WIGOS Node PoC
 
 Version: v0.14.0 v0.14.0
 

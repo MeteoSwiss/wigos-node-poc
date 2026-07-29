@@ -1,7 +1,7 @@
 [project]
-name = "oscar-nextgen-node-poc"
+name = "wigos-node-poc"
 version = "0.14.0"
-description = "Proof of concept OSCAR nextGen node for reviewing and editing WMDR2 full records"
+description = "Proof of concept WIGOS node for reviewing and editing WMDR2 full records"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.110",

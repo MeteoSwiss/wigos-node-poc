@@ -14,7 +14,7 @@ from .validation import normalize_record, validate_record
 
 app = FastAPI(
     title="OSCAR nextGen Node PoC",
-    version="0.13.0",
+    version="0.15.0",
     description="Local PoC node for upload, review/edit, validation, and export of WMDR2 v0.3.x full records.",
 )
 app.add_middleware(
