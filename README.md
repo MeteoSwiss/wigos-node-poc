@@ -1,4 +1,4 @@
-# oscar-nextgen-poc
-Proof-of-concept regarding viability of EUMETNET/MeteoGate infrastructure for leveraging and hosting OSCAR nextGen
+# wigos-node-poc
+Proof-of-concept for managing WMDR2 metadata records.
 
-For more information, cf. [Wiki Home](https://github.com/MeteoSwiss/oscar-nextgen-poc/wiki)
+For more information, cf. [Wiki Home](https://github.com/MeteoSwiss/wigos-node-poc/wiki)
