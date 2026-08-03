@@ -11,6 +11,7 @@ from .schemas import WMDR2_CORE_CONFORMANCE, WMDR2_RECORD_SCHEMA
 
 WSI_RE = re.compile(r"^(0|1|2|3)-([1-9]\d*)-([0-9]+)-([A-Za-z0-9._-]+)$")
 PREFIXED_WSI_RE = re.compile(r"^(?:wsi|facility|record):(0|1|2|3)-([1-9]\d*)-([0-9]+)-([A-Za-z0-9._-]+)$")
+INSTRUMENT_PREFIX = "instrument:"
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,15 @@ def _normalize_facility_id(value: Any) -> str:
             return "-".join(prefixed.groups())
         return text
     return "0-1-0-UNKNOWN"
+
+
+def _normalize_instrument_identifier(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return text
+    return text if text.startswith(INSTRUMENT_PREFIX) else f"{INSTRUMENT_PREFIX}{text}"
 
 
 def _migrate_facility_properties(props: dict[str, Any]) -> None:
@@ -245,6 +255,9 @@ def _normalize_observing_configuration(value: Any, deployment_by_uid: dict[str, 
             if key not in config and key in location:
                 config[key] = location[key]
 
+    if "instrument" in config:
+        config["instrument"] = _normalize_instrument_identifier(config.get("instrument"))
+
     _cleanup_observing_configuration(config)
     if config.get("time") == {}:
         config.pop("time", None)
@@ -280,9 +293,11 @@ def _normalize_contact(value: Any) -> dict[str, Any]:
 def _normalize_instrument(value: Any) -> dict[str, Any]:
     inst = dict(value) if isinstance(value, dict) else {"id": "instrument:unknown"}
     if "id" not in inst and isinstance(inst.get("uid"), str):
-        pass
+        inst["uid"] = _normalize_instrument_identifier(inst.get("uid"))
     elif "id" not in inst and "uid" not in inst:
         inst["id"] = "instrument:unknown"
+    if "id" in inst:
+        inst["id"] = _normalize_instrument_identifier(inst.get("id"))
     inst.pop("serialNumber", None)
     inst.pop("serialNumbers", None)
     return inst

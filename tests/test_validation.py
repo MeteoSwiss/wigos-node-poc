@@ -261,3 +261,16 @@ def test_normalize_migrates_application_area_to_application_areas():
     assert obs["applicationAreas"] == ["weatherForecasting", "climateMonitoring"]
     assert "applicationArea" not in obs
     assert validate_record(record).valid, validate_record(record).as_dict()
+
+
+def test_normalize_prefixes_bare_instrument_ids_and_references():
+    record = minimal_record()
+    record["properties"]["instruments"] = [{"id": "RS41", "manufacturer": "Vaisala"}]
+    record["properties"]["observationSeries"][0]["observingConfigurations"][0]["instrument"] = "RS41"
+    normalized = normalize_record(record)
+    inst = normalized["properties"]["instruments"][0]
+    config = normalized["properties"]["observationSeries"][0]["observingConfigurations"][0]
+    assert inst["id"] == "instrument:RS41"
+    assert config["instrument"] == "instrument:RS41"
+    report = validate_record(normalized)
+    assert report.valid, report.as_dict()

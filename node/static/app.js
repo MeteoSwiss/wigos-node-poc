@@ -160,11 +160,20 @@ function codeInputHtml(field, value, vocabularyName, placeholder = '') {
 }
 
 function multiCodeInputHtml(field, values, vocabularyName, label) {
-  const value = asArray(values).join(', ');
+  const currentValues = asArray(values).map(inputValue).filter(Boolean);
+  const value = currentValues.join(', ');
   const selectHtml = selectOptionsHtml(vocabularyName, '', { blankLabel: `Add ${label || 'choice'}…` });
+  const chips = currentValues.length
+    ? currentValues.map(item => `
+        <span class="value-chip">
+          <span>${escapeHtml(item)}</span>
+          <button type="button" class="chip-remove" data-remove-vocab-target="${escapeAttr(field)}" data-remove-vocab-value="${escapeAttr(item)}" aria-label="Remove ${escapeAttr(item)}">×</button>
+        </span>`).join('')
+    : '<span class="xref-empty">No values selected</span>';
   return `
-    <div class="multi-vocab">
-      <input data-field="${escapeAttr(field)}" value="${escapeAttr(value)}" placeholder="comma-separated values" />
+    <div class="multi-vocab" data-multi-vocab="${escapeAttr(field)}">
+      <input type="hidden" data-field="${escapeAttr(field)}" value="${escapeAttr(value)}" />
+      <div class="multi-vocab-values" aria-label="Selected ${escapeAttr(label || field)} values">${chips}</div>
       <select class="vocab-select add-vocab-select" data-add-vocab-target="${escapeAttr(field)}" aria-label="Add ${escapeAttr(label || field)} from vocabulary">${selectHtml}</select>
     </div>`;
 }
@@ -174,7 +183,7 @@ function appendVocabularyChoice(select) {
   if (!value) return false;
   const targetField = select.dataset.addVocabTarget;
   const scope = select.closest('[data-kind], #facilityForm') || document;
-  const input = scope.querySelector(`input[data-field="${cssAttrValue(targetField)}"]`);
+  const input = scope.querySelector(`input[type="hidden"][data-field="${cssAttrValue(targetField)}"]`);
   if (!input) return false;
   const values = splitValues(input.value);
   if (!values.includes(value)) {
@@ -183,6 +192,18 @@ function appendVocabularyChoice(select) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }
   select.value = '';
+  return true;
+}
+
+function removeVocabularyChoice(button) {
+  const targetField = button.dataset.removeVocabTarget;
+  const value = button.dataset.removeVocabValue;
+  if (!targetField || !value) return false;
+  const scope = button.closest('[data-kind], #facilityForm') || document;
+  const input = scope.querySelector(`input[type="hidden"][data-field="${cssAttrValue(targetField)}"]`);
+  if (!input) return false;
+  input.value = splitValues(input.value).filter(item => item !== value).join(', ');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
   return true;
 }
 
@@ -418,6 +439,7 @@ function renderAll() {
 
 function renderValidation() {
   const panel = $('validationPanel');
+  clearValidationMarkers();
   if (!state.validation) {
     panel.className = 'validation empty';
     panel.textContent = 'No validation result yet.';
@@ -432,12 +454,124 @@ function renderValidation() {
   const parts = [];
   parts.push(`<strong>${valid ? 'Structurally valid.' : `${errors.length} error(s).`}</strong>`);
   if (errors.length) {
-    parts.push('<h3>Errors</h3><ul>' + errors.map(e => `<li><code>${escapeHtml(e.path)}</code>: ${escapeHtml(e.message)}</li>`).join('') + '</ul>');
+    parts.push('<p class="muted">Click an error path to open the relevant section. Matching fields are highlighted in the form.</p>');
+    parts.push('<h3>Errors</h3><ul>' + errors.map(e => validationMessageHtml(e, 'error')).join('') + '</ul>');
   }
   if (warnings.length) {
-    parts.push('<h3>Warnings</h3><ul>' + warnings.map(w => `<li><code>${escapeHtml(w.path)}</code>: ${escapeHtml(w.message)}</li>`).join('') + '</ul>');
+    parts.push('<h3>Warnings</h3><ul>' + warnings.map(w => validationMessageHtml(w, 'warning')).join('') + '</ul>');
   }
   panel.innerHTML = parts.join('');
+  applyValidationMarkers(errors);
+}
+
+function validationMessageHtml(message, kind) {
+  const target = validationTargetForPath(message.path);
+  const pathHtml = `<code>${escapeHtml(message.path)}</code>`;
+  const path = target?.scrollTarget
+    ? `<a class="validation-jump ${escapeAttr(kind)}" href="#${escapeAttr(target.scrollTarget)}" data-scroll-target="${escapeAttr(target.scrollTarget)}">${pathHtml}</a>`
+    : pathHtml;
+  return `<li>${path}: ${escapeHtml(message.message)}</li>`;
+}
+
+function clearValidationMarkers() {
+  document.querySelectorAll('.field-error, .field-error-label, .item-error').forEach(element => {
+    element.classList.remove('field-error', 'field-error-label', 'item-error');
+    if (element instanceof HTMLElement) {
+      element.removeAttribute('aria-invalid');
+      if (element.dataset.validationTitle) {
+        element.title = element.dataset.validationTitle;
+        delete element.dataset.validationTitle;
+      }
+    }
+  });
+}
+
+function applyValidationMarkers(errors) {
+  asArray(errors).forEach(error => {
+    const target = validationTargetForPath(error.path);
+    if (!target) return;
+    const field = target.field;
+    const item = target.item;
+    if (item) item.classList.add('item-error');
+    if (!field) return;
+    const visible = field.type === 'hidden'
+      ? field.closest('.multi-vocab') || field
+      : field;
+    visible.classList.add('field-error');
+    visible.setAttribute('aria-invalid', 'true');
+    if (visible instanceof HTMLElement) {
+      visible.dataset.validationTitle = visible.title || '';
+      visible.title = error.message;
+    }
+    const label = visible.closest('label');
+    if (label) label.classList.add('field-error-label');
+  });
+}
+
+function validationTargetForPath(path) {
+  if (!path || typeof path !== 'string') return null;
+  if (path === '$.id') return sectionFieldTarget('facilitySection', '#facilityForm [name="id"]');
+  if (path === '$.properties.title') return sectionFieldTarget('facilitySection', '#facilityForm [name="title"]');
+  if (path === '$.properties.wmoRegion') return sectionFieldTarget('facilitySection', '#facilityForm [name="wmoRegion"]');
+  if (path === '$.time.interval[0]') return sectionFieldTarget('facilitySection', '#facilityForm [name="begin"]');
+  if (path === '$.time.interval[1]') return sectionFieldTarget('facilitySection', '#facilityForm [name="end"]');
+  if (path.startsWith('$.temporalGeometry') || path.startsWith('$.geometry')) {
+    return sectionFieldTarget('facilitySection', '#temporalGeometryEditor input, #facilityForm [name="id"]');
+  }
+
+  let match = path.match(/^\$\.properties\.observationSeries\[(\d+)\](?:\.(.*))?$/);
+  if (match) {
+    const seriesIndex = Number(match[1]);
+    const rest = match[2] || '';
+    if (rest.startsWith('observingConfigurations[')) {
+      const configMatch = rest.match(/^observingConfigurations\[(\d+)\](?:\.(.*))?$/);
+      const configIndex = configMatch ? Number(configMatch[1]) : 0;
+      const configPath = configMatch?.[2] || '';
+      return configurationValidationTarget(seriesIndex, configIndex, configPath);
+    }
+    return observationValidationTarget(seriesIndex, rest);
+  }
+
+  match = path.match(/^\$\.properties\.instruments\[(\d+)\](?:\.(.*))?$/);
+  if (match) return itemValidationTarget('instrument', Number(match[1]), validationFieldFromPath(match[2] || ''));
+
+  match = path.match(/^\$\.properties\.contacts\[(\d+)\](?:\.(.*))?$/);
+  if (match) return itemValidationTarget('contact', Number(match[1]), validationFieldFromPath(match[2] || ''));
+
+  return null;
+}
+
+function sectionFieldTarget(sectionId, fieldSelector) {
+  const section = $(sectionId);
+  return { scrollTarget: sectionId, item: section, field: fieldSelector ? document.querySelector(fieldSelector) : null };
+}
+
+function observationValidationTarget(index, path) {
+  const itemId = itemDomId('observationSeries', index);
+  return itemValidationTarget('observationSeries', index, validationFieldFromPath(path), itemId);
+}
+
+function configurationValidationTarget(seriesIndex, configIndex, path) {
+  const itemId = configurationDomId(seriesIndex, configIndex);
+  const item = $(itemId);
+  const field = validationFieldFromPath(path);
+  const form = item?.querySelector('[data-kind="observingConfiguration"]');
+  return { scrollTarget: itemId, item, field: field ? form?.querySelector(`[data-field="${cssAttrValue(field)}"]`) : null };
+}
+
+function itemValidationTarget(kind, index, field, itemId = itemDomId(kind, index)) {
+  const item = $(itemId);
+  const form = item?.querySelector(`[data-kind="${cssAttrValue(kind)}"]`);
+  return { scrollTarget: itemId, item, field: field ? form?.querySelector(`[data-field="${cssAttrValue(field)}"]`) : null };
+}
+
+function validationFieldFromPath(path) {
+  if (!path) return '';
+  const normalized = path.replace(/\[(\d+)\]/g, '');
+  if (normalized === 'time' || normalized === 'time.interval') return 'time.interval.0';
+  if (normalized === 'observedFeature') return 'observedFeature.domain';
+  if (normalized === 'verticalDistanceFromReferenceSurface') return 'verticalDistanceFromReferenceSurface.value';
+  return normalized;
 }
 
 function renderFacility() {
@@ -1629,6 +1763,16 @@ document.body.addEventListener('click', event => {
     return;
   }
 
+  const removeVocab = event.target.closest('[data-remove-vocab-target]');
+  if (removeVocab) {
+    if (removeVocabularyChoice(removeVocab)) {
+      syncFacilityForm();
+      syncItemForms();
+      renderAll();
+    }
+    return;
+  }
+
   const addObsInstrument = event.target.closest('[data-add-observation-instrument]');
   if (addObsInstrument) {
     addInstrumentForObservationSeries(Number(addObsInstrument.dataset.addObservationInstrument));
@@ -1718,7 +1862,11 @@ document.body.addEventListener('input', event => {
 document.body.addEventListener('change', event => {
   const vocabAppend = event.target.closest?.('select[data-add-vocab-target]');
   if (vocabAppend) {
-    appendVocabularyChoice(vocabAppend);
+    if (appendVocabularyChoice(vocabAppend)) {
+      syncFacilityForm();
+      syncItemForms();
+      renderAll();
+    }
     return;
   }
 

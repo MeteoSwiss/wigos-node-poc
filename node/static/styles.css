@@ -388,3 +388,80 @@ dialog::backdrop { background: rgba(15, 23, 42, .6); }
 @media (max-width: 900px) {
   .new-record-grid { grid-template-columns: 1fr; }
 }
+
+.multi-vocab {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: .45rem;
+  align-items: stretch;
+}
+
+.multi-vocab-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  min-height: 2.25rem;
+  align-items: center;
+  padding: .35rem;
+  border: 1px solid #e5e7eb;
+  border-radius: .65rem;
+  background: #fff;
+}
+
+.value-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  max-width: 100%;
+  padding: .2rem .35rem .2rem .5rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  overflow-wrap: anywhere;
+}
+
+.chip-remove {
+  padding: 0 .3rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.chip-remove:hover { background: #dbeafe; }
+
+input.field-error,
+select.field-error,
+textarea.field-error,
+.multi-vocab.field-error {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, .14);
+  background: #fff7f7;
+}
+
+.multi-vocab.field-error .multi-vocab-values {
+  border-color: #dc2626;
+  background: #fff7f7;
+}
+
+.field-error-label {
+  color: #991b1b;
+}
+
+.item-error {
+  border-color: #fca5a5;
+  background: #fff7f7;
+}
+
+.validation-jump {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.validation-jump:hover {
+  text-decoration-thickness: 2px;
+}
