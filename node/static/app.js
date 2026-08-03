@@ -778,7 +778,19 @@ function syncItemForms() {
     form.querySelectorAll('[data-field]').forEach(input => {
       setField(target, input.dataset.field, coerceField(input.dataset.field, input.value));
     });
+    cleanupObservingConfiguration(target);
   });
+}
+
+function cleanupObservingConfiguration(config) {
+  const quantity = config.verticalDistanceFromReferenceSurface;
+  if (quantity && typeof quantity === 'object' && !Array.isArray(quantity)) {
+    if (isEmptyFormValue(quantity.value)) {
+      delete config.verticalDistanceFromReferenceSurface;
+    } else if (isEmptyFormValue(quantity.uom)) {
+      delete quantity.uom;
+    }
+  }
 }
 
 function getSectionForKind(kind) {
@@ -792,6 +804,7 @@ function getSectionForKind(kind) {
 function setField(obj, path, value) {
   const parts = path.split('.');
   let target = obj;
+  const ancestors = [];
   while (parts.length > 1) {
     const key = parts.shift();
     const nextKey = parts[0];
@@ -799,21 +812,39 @@ function setField(obj, path, value) {
     if (Array.isArray(target)) {
       const index = Number(key);
       target[index] ??= shouldBeArray ? [] : {};
+      ancestors.push({ container: target, key: index });
       target = target[index];
     } else {
       target[key] ??= shouldBeArray ? [] : {};
+      ancestors.push({ container: target, key });
       target = target[key];
     }
   }
   const finalKey = parts[0];
+  const empty = isEmptyFormValue(value);
   if (Array.isArray(target) && /^\d+$/.test(finalKey)) {
-    target[Number(finalKey)] = value;
-    return;
-  }
-  if (value === '' || (Array.isArray(value) && !value.length)) {
+    if (empty) delete target[Number(finalKey)];
+    else target[Number(finalKey)] = value;
+  } else if (empty) {
     delete target[finalKey];
   } else {
     target[finalKey] = value;
+  }
+  pruneEmptyAncestors(ancestors);
+}
+
+function isEmptyFormValue(value) {
+  return value === '' || value === undefined || value === null || (Array.isArray(value) && !value.length);
+}
+
+function pruneEmptyAncestors(ancestors) {
+  for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+    const { container, key } = ancestors[index];
+    const value = container[key];
+    const emptyObject = value && !Array.isArray(value) && typeof value === 'object' && Object.keys(value).length === 0;
+    const emptyArray = Array.isArray(value) && value.length === 0;
+    if (emptyObject || emptyArray) delete container[key];
+    else break;
   }
 }
 

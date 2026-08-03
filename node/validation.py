@@ -245,9 +245,27 @@ def _normalize_observing_configuration(value: Any, deployment_by_uid: dict[str, 
             if key not in config and key in location:
                 config[key] = location[key]
 
+    _cleanup_observing_configuration(config)
     if config.get("time") == {}:
         config.pop("time", None)
     return config
+
+
+def _cleanup_observing_configuration(config: dict[str, Any]) -> None:
+    """Remove optional nested UI shells that would be schema-invalid when empty.
+
+    The browser form has separate fields for quantity.value and quantity.uom.
+    Synchronizing an untouched form must not create
+    ``verticalDistanceFromReferenceSurface: {}`` or ``{uom: "m"}``, because the
+    WMDR2 quantity schema requires ``value`` when the quantity object is present.
+    """
+    quantity = config.get("verticalDistanceFromReferenceSurface")
+    if isinstance(quantity, dict):
+        value = quantity.get("value")
+        if value in (None, ""):
+            config.pop("verticalDistanceFromReferenceSurface", None)
+        elif quantity.get("uom") in (None, ""):
+            quantity.pop("uom", None)
 
 
 def _normalize_contact(value: Any) -> dict[str, Any]:

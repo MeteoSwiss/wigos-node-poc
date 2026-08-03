@@ -14,7 +14,7 @@ from .validation import normalize_record, validate_record
 
 app = FastAPI(
     title="OSCAR nextGen Node PoC",
-    version="0.15.0",
+    version="0.16.0",
     description="Local PoC node for upload, review/edit, validation, and export of WMDR2 v0.3.x full records.",
 )
 app.add_middleware(
@@ -161,4 +161,3 @@ async def _read_record_payload(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be a WMDR2 JSON object")
     return normalize_record(payload)
-
