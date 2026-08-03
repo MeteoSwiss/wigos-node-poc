@@ -11,10 +11,11 @@ from fastapi.staticfiles import StaticFiles
 from .schemas import WMDR2_RECORD_SCHEMA
 from .storage import RecordStore
 from .validation import normalize_record, validate_record
+from .vocabularies import get_all_vocabularies, get_vocabulary
 
 app = FastAPI(
     title="OSCAR nextGen Node PoC",
-    version="0.16.0",
+    version="0.2.0",
     description="Local PoC node for upload, review/edit, validation, and export of WMDR2 v0.3.x full records.",
 )
 app.add_middleware(
@@ -43,6 +44,19 @@ def health() -> dict[str, str]:
 @app.get("/api/schema")
 def schema() -> dict[str, Any]:
     return WMDR2_RECORD_SCHEMA
+
+
+@app.get("/api/vocabularies")
+def vocabularies(live: bool = True, refresh: bool = False) -> dict[str, Any]:
+    return get_all_vocabularies(live=live, refresh=refresh)
+
+
+@app.get("/api/vocabularies/{name}")
+def vocabulary(name: str, live: bool = True, refresh: bool = False) -> dict[str, Any]:
+    try:
+        return get_vocabulary(name, live=live, refresh=refresh)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Vocabulary not found") from exc
 
 
 @app.get("/api/records")
@@ -161,3 +175,4 @@ async def _read_record_payload(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be a WMDR2 JSON object")
     return normalize_record(payload)
+

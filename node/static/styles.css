@@ -320,3 +320,71 @@ dialog::backdrop { background: rgba(15, 23, 42, .6); }
   .observation-row.two,
   .observation-row.three { grid-template-columns: 1fr; }
 }
+
+.date-input {
+  font-variant-numeric: tabular-nums;
+}
+
+.vocab-select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 0.7rem;
+  padding: 0.55rem 0.65rem;
+  background: white;
+  color: #1f2937;
+  font: inherit;
+}
+
+.multi-vocab {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.7fr);
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.multi-vocab input,
+.multi-vocab select {
+  min-width: 0;
+}
+
+.add-vocab-select {
+  color: #6b7280;
+}
+
+.vocabulary-datalists {
+  display: contents;
+}
+
+@media (max-width: 760px) {
+  .multi-vocab {
+    grid-template-columns: 1fr;
+  }
+}
+
+.start-actions { margin-bottom: .5rem; }
+.saved-record-picker {
+  display: block;
+  font-weight: 600;
+  font-size: .85rem;
+  margin: .5rem 0;
+}
+.saved-record-picker select { margin-top: .25rem; }
+.saved-records-status { margin-top: .5rem; }
+.new-record-dialog { max-width: 860px; }
+.new-record-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .75rem;
+}
+.new-record-grid label {
+  display: block;
+  font-weight: 600;
+  font-size: .85rem;
+}
+.new-record-grid input,
+.new-record-grid select { margin-top: .25rem; }
+.geometry-grid { margin-top: .75rem; }
+@media (max-width: 900px) {
+  .new-record-grid { grid-template-columns: 1fr; }
+}

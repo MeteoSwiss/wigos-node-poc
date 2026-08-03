@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OSCAR nextGen Node PoC</title>
-  <link rel="stylesheet" href="static/styles.css?v=0.16.0" />
+  <link rel="stylesheet" href="static/styles.css?v=0.2.0" />
 </head>
 <body>
   <header class="topbar">
@@ -17,7 +17,11 @@
 
   <main class="layout">
     <aside class="panel upload-panel">
-      <h2>1. Submit WMDR2 record</h2>
+      <h2>1. Start or submit WMDR2 record</h2>
+      <div class="actions start-actions">
+        <button id="newRecordBtn" type="button">Start new facility</button>
+      </div>
+      <p class="muted">Create a new WMDR2 facility record from a minimal template, or load an existing JSON file.</p>
       <label class="file-picker">
         <span>Choose JSON file</span>
         <input type="file" id="fileInput" accept="application/json,.json" />
@@ -28,6 +32,19 @@
         <button id="loadPasteBtn">Load pasted JSON</button>
         <button id="loadExampleBtn" type="button">Load example</button>
       </div>
+      <hr />
+      <h2>Saved records</h2>
+      <p class="muted">Records saved in the Node data directory can be opened again here.</p>
+      <label class="saved-record-picker">Saved record
+        <select id="savedRecordSelect">
+          <option value="">No saved records loaded</option>
+        </select>
+      </label>
+      <div class="actions">
+        <button id="refreshSavedBtn" type="button">Refresh list</button>
+        <button id="openSavedBtn" type="button">Open selected</button>
+      </div>
+      <div id="savedRecordsStatus" class="muted saved-records-status">Saved records not loaded yet.</div>
       <hr />
       <h2>Validation</h2>
       <div id="validationPanel" class="validation empty">No validation result yet.</div>
@@ -55,11 +72,15 @@
           <div class="facility-row facility-main-row">
             <label>Facility id <input name="id" placeholder="0-20000-0-06725" /></label>
             <label>Title <input name="title" placeholder="Blatten" /></label>
-            <label>WMO region <input name="wmoRegion" placeholder="europe" /></label>
+            <label>WMO region <select name="wmoRegion" class="vocab-select" data-vocabulary-select="wmoRegion"><option value="">— Select —</option></select></label>
           </div>
           <div class="facility-row facility-date-row">
-            <label>Begin date <input name="begin" placeholder="YYYY-MM-DD or .." /></label>
-            <label>End date <input name="end" placeholder="YYYY-MM-DD or .." /></label>
+            <label>Begin date
+              <input name="begin" class="date-input" type="date" aria-label="Facility begin date" title="Facility begin date; blank is stored as .." />
+            </label>
+            <label>End date
+              <input name="end" class="date-input" type="date" aria-label="Facility end date" title="Facility end date; blank is stored as .." />
+            </label>
           </div>
           <div class="hidden-fields" aria-hidden="true">
             <input name="lon" type="hidden" />
@@ -131,6 +152,56 @@
     </section>
   </main>
 
+  <dialog id="newRecordModal">
+    <form method="dialog" class="modal-card new-record-dialog">
+      <header>
+        <h2>Create new facility</h2>
+        <button value="cancel" aria-label="Close">×</button>
+      </header>
+      <section class="modal-body">
+        <p class="muted">Create a minimal WMDR2 full record. ObservationSeries, instruments, contacts, and geolocation history can then be added in the main form.</p>
+        <div class="new-record-grid">
+          <label>Facility id / WSI
+            <input id="newRecordIdInput" placeholder="0-20000-0-06725" pattern="(0|1|2|3)-([1-9]\d*)-([0-9]+)-([A-Za-z0-9._-]+)" required />
+          </label>
+          <label>Title
+            <input id="newRecordTitleInput" placeholder="Facility title" required />
+          </label>
+          <label>WMO region
+            <select id="newRecordWmoRegionSelect" class="vocab-select" data-vocabulary-select="wmoRegion"><option value="">— Select —</option></select>
+          </label>
+          <label>Begin date
+            <input id="newRecordBeginInput" class="date-input" type="date" title="Blank is stored as .." />
+          </label>
+          <label>End date
+            <input id="newRecordEndInput" class="date-input" type="date" title="Blank is stored as .." />
+          </label>
+        </div>
+        <details class="subsection inline-details">
+          <summary>Optional current geometry</summary>
+          <p class="muted">Leave coordinates blank to start without a current location. Add or edit geolocation history later under Facility.</p>
+          <div class="new-record-grid geometry-grid">
+            <label>Longitude
+              <input id="newRecordLonInput" type="number" step="any" placeholder="7.8232" />
+            </label>
+            <label>Latitude
+              <input id="newRecordLatInput" type="number" step="any" placeholder="46.4204" />
+            </label>
+            <label>Elevation
+              <input id="newRecordElevInput" type="number" step="any" placeholder="1540" />
+            </label>
+          </div>
+        </details>
+        <div id="newRecordResult" class="validation empty">Enter at least a facility id and title.</div>
+      </section>
+      <footer class="actions">
+        <button value="cancel" type="button" id="newRecordCancelBtn">Cancel</button>
+        <button value="ok" type="button" id="newRecordCreateBtn">Create facility</button>
+      </footer>
+    </form>
+  </dialog>
+
+
   <dialog id="ownerContactModal">
     <form method="dialog" class="modal-card owner-contact-dialog">
       <header>
@@ -190,6 +261,7 @@
     </form>
   </dialog>
 
-  <script src="static/app.js?v=0.16.0" type="module"></script>
+  <div id="vocabularyDatalists" class="vocabulary-datalists" aria-hidden="true"></div>
+  <script src="static/app.js?v=0.2.0" type="module"></script>
 </body>
 </html>

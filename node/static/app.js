@@ -2,6 +2,8 @@ const state = {
   record: null,
   recordId: null,
   validation: null,
+  vocabularies: {},
+  vocabularyStatus: 'not-loaded',
   modalTarget: null,
   pendingScrollTarget: null,
   selectedTemporalGeometryIndex: null,
@@ -35,6 +37,185 @@ function appUrl(path) {
     return value;
   }
   return new URL(value.replace(/^\/+/, ''), appBaseUrl).toString();
+}
+
+
+function isoDateOrEmpty(value) {
+  const text = String(value ?? '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+
+function cssAttrValue(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function dateControlHtml(field, value, label) {
+  return `<input class="date-input" type="date" data-field="${escapeAttr(field)}" value="${escapeAttr(isoDateOrEmpty(value))}" aria-label="${escapeAttr(label)}" title="${escapeAttr(label)}; blank is stored as .." />`;
+}
+
+function syncDatePickerFromTextInput(input) {
+  const formScope = input.closest('[data-kind], #facilityForm');
+  if (!formScope) return;
+  const linkedName = input.name;
+  const linkedField = input.dataset?.field;
+  let picker = null;
+  if (linkedField) {
+    picker = formScope.querySelector(`input[type="date"][data-linked-field="${cssAttrValue(linkedField)}"]`);
+  } else if (linkedName) {
+    picker = formScope.querySelector(`input[type="date"][data-linked-name="${cssAttrValue(linkedName)}"]`);
+  }
+  if (picker) picker.value = isoDateOrEmpty(input.value);
+}
+
+function syncDatePickers(container) {
+  container.querySelectorAll('input[data-date-text], input[data-field="time.interval.0"], input[data-field="time.interval.1"]').forEach(syncDatePickerFromTextInput);
+}
+
+function applyDatePickerValue(event) {
+  const picker = event.target?.closest?.('input[type="date"][data-linked-name], input[type="date"][data-linked-field]');
+  if (!picker) return false;
+  const formScope = picker.closest('[data-kind], #facilityForm');
+  if (!formScope) return false;
+  let linked = null;
+  if (picker.dataset.linkedField) {
+    linked = formScope.querySelector(`[data-field="${cssAttrValue(picker.dataset.linkedField)}"]`);
+  } else if (picker.dataset.linkedName) {
+    linked = formScope.querySelector(`[name="${cssAttrValue(picker.dataset.linkedName)}"]`);
+  }
+  if (!linked) return false;
+  linked.value = picker.value || '..';
+  return true;
+}
+
+
+function vocabulary(name) {
+  return state.vocabularies?.[name] || { options: [], source: 'unavailable' };
+}
+
+function vocabularyOptions(name) {
+  return asArray(vocabulary(name).options);
+}
+
+function vocabularyDatalistId(name) {
+  return `vocab-${name}`;
+}
+
+function optionValue(option) {
+  return inputValue(option?.value ?? '');
+}
+
+function optionLabel(option) {
+  const value = optionValue(option);
+  const label = inputValue(option?.label ?? '').trim();
+  if (!label || label === value) return value;
+  return `${value} — ${label}`;
+}
+
+function selectOptionsHtml(vocabularyName, currentValue, { includeBlank = true, blankLabel = '— Select —' } = {}) {
+  const current = inputValue(currentValue).trim();
+  const options = vocabularyOptions(vocabularyName);
+  const seen = new Set();
+  const parts = [];
+  if (includeBlank) {
+    parts.push(`<option value="">${escapeHtml(blankLabel)}</option>`);
+  }
+  options.forEach(option => {
+    const value = optionValue(option).trim();
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    const selected = value === current ? ' selected' : '';
+    const title = [option?.label, option?.description].filter(Boolean).join(' — ');
+    parts.push(`<option value="${escapeAttr(value)}"${selected}${title ? ` title="${escapeAttr(title)}"` : ''}>${escapeHtml(optionLabel(option))}</option>`);
+  });
+  if (current && !seen.has(current)) {
+    parts.unshift(`<option value="${escapeAttr(current)}" selected>${escapeHtml(`${current} — current value`)}</option>`);
+  }
+  return parts.join('');
+}
+
+function setSelectValue(select, value, label = 'current value') {
+  if (!select) return;
+  const text = inputValue(value).trim();
+  if (text && ![...select.options].some(option => option.value === text)) {
+    const option = document.createElement('option');
+    option.value = text;
+    option.textContent = `${text} — ${label}`;
+    select.insertBefore(option, select.firstChild);
+  }
+  select.value = text;
+}
+
+function populateStaticVocabularySelects(container = document) {
+  container.querySelectorAll('select[data-vocabulary-select]').forEach(select => {
+    const current = select.value || select.dataset.currentValue || '';
+    const vocabularyName = select.dataset.vocabularySelect;
+    select.innerHTML = selectOptionsHtml(vocabularyName, current, { blankLabel: '— Select —' });
+    setSelectValue(select, current);
+  });
+}
+
+function codeInputHtml(field, value, vocabularyName, placeholder = '') {
+  const placeholderText = placeholder || '— Select —';
+  return `<select class="vocab-select" data-field="${escapeAttr(field)}" data-vocabulary-select="${escapeAttr(vocabularyName)}">${selectOptionsHtml(vocabularyName, value, { blankLabel: placeholderText })}</select>`;
+}
+
+function multiCodeInputHtml(field, values, vocabularyName, label) {
+  const value = asArray(values).join(', ');
+  const selectHtml = selectOptionsHtml(vocabularyName, '', { blankLabel: `Add ${label || 'choice'}…` });
+  return `
+    <div class="multi-vocab">
+      <input data-field="${escapeAttr(field)}" value="${escapeAttr(value)}" placeholder="comma-separated values" />
+      <select class="vocab-select add-vocab-select" data-add-vocab-target="${escapeAttr(field)}" aria-label="Add ${escapeAttr(label || field)} from vocabulary">${selectHtml}</select>
+    </div>`;
+}
+
+function appendVocabularyChoice(select) {
+  const value = select.value;
+  if (!value) return false;
+  const targetField = select.dataset.addVocabTarget;
+  const scope = select.closest('[data-kind], #facilityForm') || document;
+  const input = scope.querySelector(`input[data-field="${cssAttrValue(targetField)}"]`);
+  if (!input) return false;
+  const values = splitValues(input.value);
+  if (!values.includes(value)) {
+    values.push(value);
+    input.value = values.join(', ');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  select.value = '';
+  return true;
+}
+
+function renderVocabularyDatalists() {
+  const container = $('vocabularyDatalists');
+  if (!container) return;
+  const vocabularies = state.vocabularies || {};
+  container.innerHTML = Object.entries(vocabularies).map(([name, vocab]) => {
+    const options = asArray(vocab.options).map(option => {
+      const value = option?.value ?? '';
+      const label = option?.label && option.label !== value ? option.label : '';
+      const title = [option?.label, option?.description].filter(Boolean).join(' — ');
+      return `<option value="${escapeAttr(value)}"${label ? ` label="${escapeAttr(label)}"` : ''}${title ? ` title="${escapeAttr(title)}"` : ''}></option>`;
+    }).join('');
+    return `<datalist id="${escapeAttr(vocabularyDatalistId(name))}">${options}</datalist>`;
+  }).join('');
+  populateStaticVocabularySelects();
+}
+
+async function loadVocabularies() {
+  try {
+    const result = await api('/api/vocabularies?live=true');
+    state.vocabularies = result.vocabularies || {};
+    state.vocabularyStatus = result.source || 'loaded';
+    renderVocabularyDatalists();
+    if (state.record) renderAll();
+  } catch (error) {
+    console.warn('Could not load WMDR code lists; using browser-side empty suggestions.', error);
+    state.vocabularies = {};
+    state.vocabularyStatus = 'unavailable';
+    renderVocabularyDatalists();
+    if (state.record) renderAll();
+  }
 }
 
 const exampleRecord = {
@@ -144,6 +325,41 @@ async function api(path, options = {}) {
 async function loadRecord(record, sourceFilename = null) {
   const result = await api('/api/records', { method: 'POST', body: JSON.stringify(record) });
   acceptLoadedRecord(result, sourceFilename);
+  await refreshSavedRecords(result.id);
+}
+
+async function refreshSavedRecords(selectedId = state.recordId || state.record?.id || '') {
+  const select = $('savedRecordSelect');
+  const status = $('savedRecordsStatus');
+  if (!select) return;
+  try {
+    const result = await api('/api/records');
+    const records = asArray(result.records);
+    select.innerHTML = records.length
+      ? records.map(id => `<option value="${escapeAttr(id)}">${escapeHtml(id)}</option>`).join('')
+      : '<option value="">No saved records found</option>';
+    if (selectedId && records.includes(selectedId)) select.value = selectedId;
+    if (status) status.textContent = records.length ? `${records.length} saved record(s) available.` : 'No saved records in the Node data directory yet.';
+    $('openSavedBtn').disabled = records.length === 0;
+  } catch (error) {
+    select.innerHTML = '<option value="">Could not load saved records</option>';
+    if (status) status.textContent = error.message;
+    $('openSavedBtn').disabled = true;
+  }
+}
+
+async function openSavedRecord() {
+  const selectedId = $('savedRecordSelect')?.value;
+  if (!selectedId) {
+    alert('No saved record selected.');
+    return;
+  }
+  try {
+    const result = await api(`/api/records/${encodeURIComponent(selectedId)}`);
+    acceptLoadedRecord(result, `${selectedId}.json`);
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 function acceptLoadedRecord(result, sourceFilename = null) {
@@ -230,14 +446,14 @@ function renderFacility() {
   form.elements.id.value = state.record.id || '';
   form.elements.title.value = p.title || '';
   form.elements.description.value = p.description || '';
-  form.elements.wmoRegion.value = p.wmoRegion || '';
+  setSelectValue(form.elements.wmoRegion, p.wmoRegion || '');
   const coords = state.record.geometry?.coordinates || [];
   form.elements.lon.value = coords[0] ?? '';
   form.elements.lat.value = coords[1] ?? '';
   form.elements.elev.value = coords[2] ?? '';
   const interval = state.record.time?.interval || [];
-  form.elements.begin.value = interval[0] ?? '';
-  form.elements.end.value = interval[1] ?? '';
+  form.elements.begin.value = isoDateOrEmpty(interval[0]);
+  form.elements.end.value = isoDateOrEmpty(interval[1]);
   renderTemporalGeometryHistory();
   renderFacilityContactLinks();
 }
@@ -470,17 +686,17 @@ function observationSeriesFormHtml(obs, index) {
   return `
     <div class="item-form observation-form" data-kind="observationSeries" data-index="${index}">
       <div class="observation-row two">
-        <label>Observed property <input data-field="observedProperty" value="${escapeAttr(obs.observedProperty ?? '')}" /></label>
-        <label>Observed geometry <input data-field="observedGeometry" value="${escapeAttr(obs.observedGeometry ?? '')}" /></label>
+        <label>Observed property ${codeInputHtml('observedProperty', obs.observedProperty, 'observedVariableAtmosphere')}</label>
+        <label>Observed geometry ${codeInputHtml('observedGeometry', obs.observedGeometry, 'observedGeometry')}</label>
       </div>
       <div class="observation-row three">
-        <label>Domain <input data-field="observedFeature.domain" value="${escapeAttr(obs.observedFeature?.domain ?? '')}" /></label>
+        <label>Domain ${codeInputHtml('observedFeature.domain', obs.observedFeature?.domain, 'domain')}</label>
         <label>Domain feature <input data-field="observedFeature.domainFeature" value="${escapeAttr(obs.observedFeature?.domainFeature ?? '')}" /></label>
         <label>Feature name <input data-field="observedFeature.featureName" value="${escapeAttr(obs.observedFeature?.featureName ?? '')}" /></label>
       </div>
       <div class="observation-row two">
-        <label>Program affiliations, comma-separated <input data-field="programAffiliations" value="${escapeAttr(asArray(obs.programAffiliations).join(', '))}" /></label>
-        <label>Application areas, comma-separated <input data-field="applicationAreas" value="${escapeAttr(asArray(obs.applicationAreas).join(', '))}" /></label>
+        <label>Program affiliations ${multiCodeInputHtml('programAffiliations', obs.programAffiliations, 'programAffiliations', 'program affiliation')}</label>
+        <label>Application areas ${multiCodeInputHtml('applicationAreas', obs.applicationAreas, 'applicationAreas', 'application area')}</label>
       </div>
     </div>
     ${observationConfigurationLinksHtml(obs, index)}
@@ -555,18 +771,18 @@ function configLabel(config, index) {
 function configurationFormHtml(config, seriesIndex, configIndex) {
   return `
     <div class="item-form" data-kind="observingConfiguration" data-series-index="${seriesIndex}" data-config-index="${configIndex}">
-      <label>Begin <input data-field="time.interval.0" placeholder="YYYY-MM-DD or .." value="${escapeAttr(configStart(config))}" /></label>
-      <label>End <input data-field="time.interval.1" placeholder="YYYY-MM-DD or .." value="${escapeAttr(configEnd(config))}" /></label>
-      <label>Observing method <input data-field="observingMethod" value="${escapeAttr(inputValue(config.observingMethod))}" /></label>
-      <label>Operating status <input data-field="operatingStatus" value="${escapeAttr(inputValue(config.operatingStatus))}" /></label>
-      <label>Source of observation <input data-field="sourceOfObservation" value="${escapeAttr(inputValue(config.sourceOfObservation))}" /></label>
+      <label>Begin ${dateControlHtml('time.interval.0', configStart(config), 'configuration begin date')}</label>
+      <label>End ${dateControlHtml('time.interval.1', configEnd(config), 'configuration end date')}</label>
+      <label>Observing method ${codeInputHtml('observingMethod', config.observingMethod, 'observingMethodAtmosphere')}</label>
+      <label>Operating status ${codeInputHtml('operatingStatus', config.operatingStatus, 'operatingStatus')}</label>
+      <label>Source of observation ${codeInputHtml('sourceOfObservation', config.sourceOfObservation, 'sourceOfObservation')}</label>
       <label>Instrument ID <input data-field="instrument" value="${escapeAttr(config.instrument || '')}" /></label>
       <label>Serial number <input data-field="serialNumber" value="${escapeAttr(config.serialNumber || '')}" /></label>
-      <label>Exposure <input data-field="exposure" value="${escapeAttr(config.exposure ?? '')}" /></label>
-      <label>Reference surface <input data-field="referenceSurface" value="${escapeAttr(config.referenceSurface ?? '')}" /></label>
+      <label>Exposure ${codeInputHtml('exposure', config.exposure, 'exposure')}</label>
+      <label>Reference surface ${codeInputHtml('referenceSurface', config.referenceSurface, 'referenceSurface')}</label>
       <label>Relative location <input data-field="relativeLocation" value="${escapeAttr(config.relativeLocation ?? '')}" /></label>
       <label>Vertical distance value <input data-field="verticalDistanceFromReferenceSurface.value" value="${escapeAttr(config.verticalDistanceFromReferenceSurface?.value ?? '')}" /></label>
-      <label>Vertical distance uom <input data-field="verticalDistanceFromReferenceSurface.uom" value="${escapeAttr(config.verticalDistanceFromReferenceSurface?.uom ?? '')}" /></label>
+      <label>Vertical distance uom ${codeInputHtml('verticalDistanceFromReferenceSurface.uom', config.verticalDistanceFromReferenceSurface?.uom, 'unit')}</label>
     </div>`;
 }
 
@@ -595,7 +811,7 @@ function instrumentFormHtml(inst, index) {
       <label>Title <input data-field="title" value="${escapeAttr(inst.title || '')}" /></label>
       <label>Manufacturer <input data-field="manufacturer" value="${escapeAttr(inst.manufacturer || '')}" /></label>
       <label>Model <input data-field="model" value="${escapeAttr(inst.model || '')}" /></label>
-      <label>Observing methods, comma-separated <input data-field="observingMethods" value="${escapeAttr(asArray(inst.observingMethods).join(', '))}" /></label>
+      <label>Observing methods ${multiCodeInputHtml('observingMethods', inst.observingMethods, 'observingMethodAtmosphere', 'observing method')}</label>
       <label class="wide">Description <textarea data-field="description" rows="2">${escapeHtml(inst.description || '')}</textarea></label>
     </div>
     ${instrumentCrossLinksHtml(inst)}`;
@@ -901,6 +1117,107 @@ function displayCompact(value) {
 
 
 
+function openNewRecordDialog() {
+  const modal = $('newRecordModal');
+  if (!modal) return;
+  $('newRecordIdInput').value = '';
+  $('newRecordTitleInput').value = '';
+  setSelectValue($('newRecordWmoRegionSelect'), '');
+  $('newRecordBeginInput').value = '';
+  $('newRecordEndInput').value = '';
+  $('newRecordLonInput').value = '';
+  $('newRecordLatInput').value = '';
+  $('newRecordElevInput').value = '';
+  const result = $('newRecordResult');
+  if (result) {
+    result.className = 'validation empty';
+    result.textContent = 'Enter at least a facility id and title.';
+  }
+  populateStaticVocabularySelects(modal);
+  modal.showModal();
+  window.setTimeout(() => $('newRecordIdInput')?.focus(), 0);
+}
+
+function newRecordInputValue(id) {
+  return String($(id)?.value ?? '').trim();
+}
+
+function createNewRecordTemplateFromDialog() {
+  const facilityId = newRecordInputValue('newRecordIdInput');
+  const title = newRecordInputValue('newRecordTitleInput');
+  const result = $('newRecordResult');
+  if (!facilityId) {
+    if (result) {
+      result.className = 'validation invalid';
+      result.textContent = 'Facility id is required for a new record.';
+    }
+    return null;
+  }
+  if (!title) {
+    if (result) {
+      result.className = 'validation invalid';
+      result.textContent = 'Title is required for a new record.';
+    }
+    return null;
+  }
+
+  const begin = newRecordInputValue('newRecordBeginInput') || '..';
+  const end = newRecordInputValue('newRecordEndInput') || '..';
+  const lon = numberOrNull(newRecordInputValue('newRecordLonInput'));
+  const lat = numberOrNull(newRecordInputValue('newRecordLatInput'));
+  const elev = numberOrNull(newRecordInputValue('newRecordElevInput'));
+  const hasPoint = lon !== null && lat !== null;
+  const coordinates = hasPoint ? (elev === null ? [lon, lat] : [lon, lat, elev]) : null;
+  const wmoRegion = newRecordInputValue('newRecordWmoRegionSelect');
+
+  const record = {
+    type: 'Feature',
+    id: facilityId,
+    conformsTo: ['http://wigos.wmo.int/spec/wmdr/2/conf/core'],
+    geometry: hasPoint ? { type: 'Point', coordinates } : null,
+    time: { interval: [begin, end], resolution: 'P1D' },
+    properties: {
+      type: 'facility',
+      title,
+      observationSeries: [],
+      instruments: [],
+      contacts: [],
+      schedules: [],
+    },
+  };
+  if (wmoRegion) record.properties.wmoRegion = wmoRegion;
+  if (hasPoint) {
+    record.temporalGeometry = {
+      type: 'MovingPoint',
+      coordinates: [coordinates],
+      dates: [begin],
+      methods: [[]],
+    };
+  }
+  return record;
+}
+
+async function createNewRecordFromDialog() {
+  const record = createNewRecordTemplateFromDialog();
+  if (!record) return;
+  const result = $('newRecordResult');
+  if (result) {
+    result.className = 'validation empty';
+    result.textContent = 'Creating facility…';
+  }
+  try {
+    await loadRecord(record, `${safeFileNamePart(record.id)}.json`);
+    $('newRecordModal').close();
+  } catch (error) {
+    if (result) {
+      result.className = 'validation invalid';
+      result.textContent = error.message;
+    } else {
+      alert(error.message);
+    }
+  }
+}
+
 function defaultSaveFileName() {
   const base = state.record?.id || 'record';
   return `${safeFileNamePart(base)}.json`;
@@ -942,6 +1259,7 @@ async function saveAsFromDialog() {
     state.sourceFilename = result.filename || filename;
     state.saveLocation = result.location || location;
     renderAll();
+    await refreshSavedRecords(result.id || state.recordId);
     resultPanel.className = 'validation valid save-success';
     resultPanel.innerHTML = `Saved to <code>${escapeHtml(result.saved_as || filename)}</code>.`;
   } catch (error) {
@@ -1230,6 +1548,9 @@ function escapeAttr(value) {
   return escapeHtml(value);
 }
 
+loadVocabularies();
+refreshSavedRecords();
+
 $('fileInput').addEventListener('change', async event => {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -1238,6 +1559,7 @@ $('fileInput').addEventListener('change', async event => {
     form.append('file', file);
     const result = await api('/api/records', { method: 'POST', body: form });
     acceptLoadedRecord(result, file.name);
+    await refreshSavedRecords(result.id);
   } catch (error) {
     alert(error.message);
   }
@@ -1252,6 +1574,9 @@ $('loadPasteBtn').addEventListener('click', async () => {
 });
 
 $('loadExampleBtn').addEventListener('click', () => loadRecord(exampleRecord).catch(error => alert(error.message)));
+$('newRecordBtn').addEventListener('click', () => openNewRecordDialog());
+$('refreshSavedBtn').addEventListener('click', () => refreshSavedRecords());
+$('openSavedBtn').addEventListener('click', () => openSavedRecord());
 $('saveBtn').addEventListener('click', () => openSaveDialog());
 $('validateBtn').addEventListener('click', () => validateRecord().catch(error => alert(error.message)));
 $('applyRawBtn').addEventListener('click', () => {
@@ -1273,6 +1598,8 @@ $('modalApplyBtn').addEventListener('click', () => {
 });
 $('saveCancelBtn').addEventListener('click', () => $('saveModal').close());
 $('saveConfirmBtn').addEventListener('click', () => saveAsFromDialog());
+$('newRecordCancelBtn').addEventListener('click', () => $('newRecordModal').close());
+$('newRecordCreateBtn').addEventListener('click', () => createNewRecordFromDialog());
 $('ownerContactCancelBtn').addEventListener('click', () => $('ownerContactModal').close());
 $('ownerContactAssignBtn').addEventListener('click', () => assignSelectedOwnerContact());
 $('ownerContactJumpBtn').addEventListener('click', () => jumpToSelectedOwnerContact());
@@ -1373,7 +1700,11 @@ document.body.addEventListener('click', event => {
 });
 
 document.body.addEventListener('input', event => {
+  const changedByCalendar = applyDatePickerValue(event);
   if (!state.record) return;
+  if (!changedByCalendar && (event.target.matches?.('input[data-date-text], input[data-field="time.interval.0"], input[data-field="time.interval.1"]'))) {
+    syncDatePickerFromTextInput(event.target);
+  }
   if (event.target.closest('#facilityForm') || event.target.closest('[data-kind]')) {
     syncFacilityForm();
     syncItemForms();
@@ -1385,12 +1716,28 @@ document.body.addEventListener('input', event => {
 });
 
 document.body.addEventListener('change', event => {
+  const vocabAppend = event.target.closest?.('select[data-add-vocab-target]');
+  if (vocabAppend) {
+    appendVocabularyChoice(vocabAppend);
+    return;
+  }
+
+  const changedByCalendar = applyDatePickerValue(event);
   if (!state.record) return;
+  if (!changedByCalendar && (event.target.matches?.('input[data-date-text], input[data-field="time.interval.0"], input[data-field="time.interval.1"]'))) {
+    syncDatePickerFromTextInput(event.target);
+  }
   const field = event.target?.dataset?.field;
   if (!field) return;
-  if (['instrument', 'id', 'uid', 'identifier', 'roles', 'name', 'organization', 'time.interval.0', 'time.interval.1', 'observingMethod', 'date', 'lon', 'lat', 'elev', 'methods'].includes(field)) {
-    syncFacilityForm();
-    syncItemForms();
+
+  syncFacilityForm();
+  syncItemForms();
+  $('recordRaw').value = pretty(state.record);
+  $('recordTitle').textContent = props().title || state.record.id || 'Untitled facility';
+  $('recordId').textContent = state.record.id || 'No id';
+  $('downloadLink').href = appUrl(`api/records/${encodeURIComponent(state.record.id)}/download`);
+
+  if (changedByCalendar || ['instrument', 'id', 'uid', 'identifier', 'roles', 'name', 'organization', 'time.interval.0', 'time.interval.1', 'observingMethod', 'observedProperty', 'observedGeometry', 'date', 'lon', 'lat', 'elev', 'methods'].includes(field)) {
     refreshRelationshipViews();
   }
 });
