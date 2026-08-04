@@ -17,16 +17,16 @@
 
   <main class="layout">
     <aside class="panel upload-panel">
-      <h2>1. Start or submit WMDR2 record</h2>
+      <h2>Create, choose or paste WMDR2 record</h2>
+      <p class="muted">Create a new WMDR2 facility record from a minimal template, or load an existing JSON file ...</p>
       <div class="actions start-actions">
-        <button id="newRecordBtn" type="button">Create new facility</button>
+        <button id="newRecordBtn" type="button">Create new record</button>
       </div>
-      <p class="muted">Create a new WMDR2 facility record from a minimal template, or load an existing JSON file.</p>
       <label class="file-picker">
         <span>Choose JSON file</span>
         <input type="file" id="fileInput" accept="application/json,.json" />
       </label>
-      <p class="muted">Or paste a record below.</p>
+      <p class="muted">... or paste a record below.</p>
       <textarea id="pasteInput" class="code" rows="12" spellcheck="false" placeholder='{"type":"Feature", ...}'></textarea>
       <div class="actions">
         <button id="loadPasteBtn">Load pasted JSON</button>
