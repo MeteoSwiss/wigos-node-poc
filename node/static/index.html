@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WIGOS Node PoC</title>
+  <link rel="stylesheet" href="static/styles.css?v=0.2.0-field-validation" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>WIGOS Node PoC</h1>
+      <p>Upload, review, edit, validate, and export a WMDR2 v0.3.x full record.</p>
+    </div>
+    <div class="status" id="status">No record loaded</div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel upload-panel">
+      <h2>Create, choose or paste WMDR2 record</h2>
+      <p class="muted">Create a new WMDR2 facility record from a minimal template, or load an existing JSON file ...</p>
+      <div class="actions start-actions">
+        <button id="newRecordBtn" type="button">Create new record</button>
+      </div>
+      <label class="file-picker">
+        <span>Choose JSON file</span>
+        <input type="file" id="fileInput" accept="application/json,.json" />
+      </label>
+      <p class="muted">... or paste a record below.</p>
+      <textarea id="pasteInput" class="code" rows="12" spellcheck="false" placeholder='{"type":"Feature", ...}'></textarea>
+      <div class="actions">
+        <button id="loadPasteBtn">Load pasted JSON</button>
+        <button id="loadExampleBtn" type="button">Load example</button>
+      </div>
+      <hr />
+      <h2>Saved records</h2>
+      <p class="muted">Records saved in the Node data directory can be opened again here.</p>
+      <label class="saved-record-picker">Saved record
+        <select id="savedRecordSelect">
+          <option value="">No saved records loaded</option>
+        </select>
+      </label>
+      <div class="actions">
+        <button id="refreshSavedBtn" type="button">Refresh list</button>
+        <button id="openSavedBtn" type="button">Open selected</button>
+      </div>
+      <div id="savedRecordsStatus" class="muted saved-records-status">Saved records not loaded yet.</div>
+      <hr />
+      <h2>Validation</h2>
+      <div id="validationPanel" class="validation empty">No validation result yet.</div>
+    </aside>
+
+    <section class="workspace">
+      <div class="toolbar">
+        <div>
+          <strong id="recordTitle">No active record</strong>
+          <div id="recordId" class="muted">Upload or paste a WMDR2 JSON Feature.</div>
+        </div>
+        <div class="actions">
+          <button id="validateBtn" disabled>Validate</button>
+          <button id="saveBtn" disabled>Save changes</button>
+          <a id="downloadLink" class="button disabled" href="#" aria-disabled="true">Download valid WMDR2</a>
+        </div>
+      </div>
+
+      <details class="card" id="facilitySection" open>
+        <summary>
+          <span>Facility</span>
+          <button class="summary-action" data-open-modal="facilityRaw" type="button">Edit JSON</button>
+        </summary>
+        <form id="facilityForm" class="facility-form">
+          <div class="facility-row facility-main-row">
+            <label>Facility id <input name="id" placeholder="0-20000-0-06725" /></label>
+            <label>Title <input name="title" placeholder="Blatten" /></label>
+            <label>WMO region <select name="wmoRegion" class="vocab-select" data-vocabulary-select="wmoRegion"><option value="">— Select —</option></select></label>
+          </div>
+          <div class="facility-row facility-date-row">
+            <label>Begin date
+              <input name="begin" class="date-input" type="date" aria-label="Facility begin date" title="Facility begin date; blank is stored as .." />
+            </label>
+            <label>End date
+              <input name="end" class="date-input" type="date" aria-label="Facility end date" title="Facility end date; blank is stored as .." />
+            </label>
+          </div>
+          <div class="hidden-fields" aria-hidden="true">
+            <input name="lon" type="hidden" />
+            <input name="lat" type="hidden" />
+            <input name="elev" type="hidden" />
+          </div>
+          <details class="subsection inline-details" id="temporalGeometryEditor">
+            <summary>Geolocation history <span id="temporalGeometryCount" class="badge">0</span></summary>
+            <p class="muted">Edits the top-level <code>temporalGeometry</code> MovingPoint. The current top-level <code>geometry</code> is updated automatically from the latest complete row.</p>
+            <div id="temporalGeometryList" class="list"></div>
+            <div class="actions section-actions">
+              <button id="addTemporalGeometryBtn" type="button">Add geolocation row</button>
+            </div>
+          </details>
+          <label class="wide">Description <textarea name="description" rows="3"></textarea></label>
+        </form>
+      </details>
+
+      <details class="card" id="observationsSection">
+        <summary>
+          <span>ObservationSeries <span id="observationCount" class="badge">0</span></span>
+          <button class="summary-action" data-open-modal="observationSeriesRaw" type="button">Edit JSON</button>
+        </summary>
+        <div id="observationsList" class="list"></div>
+        <div class="actions section-actions">
+          <button id="addObservationBtn">Add ObservationSeries</button>
+        </div>
+      </details>
+
+      <details class="card" id="configurationsSection">
+        <summary>
+          <span>Observing configurations <span id="configurationCount" class="badge">0</span></span>
+          <button class="summary-action" data-open-modal="configurationsRaw" type="button">Edit JSON</button>
+        </summary>
+        <p class="muted">WMDR2 v0.3.x no longer has facility-level deployments. The dated observing context is edited here from ObservationSeries observingConfigurations, including time interval, location context, serial number, and optional instrument references.</p>
+        <div id="configurationsList" class="list"></div>
+      </details>
+
+      <details class="card" id="instrumentsSection">
+        <summary>
+          <span>Instruments <span id="instrumentCount" class="badge">0</span></span>
+          <button class="summary-action" data-open-modal="instrumentsRaw" type="button">Edit JSON</button>
+        </summary>
+        <p class="muted">Instruments hold catalogue-like information such as manufacturer, model, and observing-method capability. ObservingConfigurations point to instruments when the instrument type is known.</p>
+        <div id="instrumentsList" class="list"></div>
+        <div class="actions section-actions">
+          <button id="addInstrumentBtn">Add instrument</button>
+        </div>
+      </details>
+
+      <details class="card" id="contactsSection">
+        <summary>
+          <span>Contacts <span id="contactCount" class="badge">0</span></span>
+          <button class="summary-action" data-open-modal="contactsRaw" type="button">Edit JSON</button>
+        </summary>
+        <div id="contactsList" class="list"></div>
+        <div class="actions section-actions">
+          <button id="addContactBtn">Add contact</button>
+        </div>
+      </details>
+
+      <details class="card" id="fullRecordSection">
+        <summary>Full record JSON</summary>
+        <textarea id="recordRaw" class="code" rows="24" spellcheck="false"></textarea>
+        <div class="actions section-actions">
+          <button id="applyRawBtn">Apply full JSON</button>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <dialog id="newRecordModal">
+    <form method="dialog" class="modal-card new-record-dialog">
+      <header>
+        <h2>Create new facility</h2>
+        <button value="cancel" aria-label="Close">×</button>
+      </header>
+      <section class="modal-body">
+        <p class="muted">Create a minimal WMDR2 full record. ObservationSeries, instruments, contacts, and geolocation history can then be added in the main form.</p>
+        <div class="new-record-grid">
+          <label>Facility id / WSI
+            <input id="newRecordIdInput" placeholder="0-20000-0-06725" pattern="(0|1|2|3)-([1-9]\d*)-([0-9]+)-([A-Za-z0-9._-]+)" required />
+          </label>
+          <label>Title
+            <input id="newRecordTitleInput" placeholder="Facility title" required />
+          </label>
+          <label>WMO region
+            <select id="newRecordWmoRegionSelect" class="vocab-select" data-vocabulary-select="wmoRegion"><option value="">— Select —</option></select>
+          </label>
+          <label>Begin date
+            <input id="newRecordBeginInput" class="date-input" type="date" title="Blank is stored as .." />
+          </label>
+          <label>End date
+            <input id="newRecordEndInput" class="date-input" type="date" title="Blank is stored as .." />
+          </label>
+        </div>
+        <details class="subsection inline-details">
+          <summary>Optional current geometry</summary>
+          <p class="muted">Leave coordinates blank to start without a current location. Add or edit geolocation history later under Facility.</p>
+          <div class="new-record-grid geometry-grid">
+            <label>Longitude
+              <input id="newRecordLonInput" type="number" step="any" placeholder="7.8232" />
+            </label>
+            <label>Latitude
+              <input id="newRecordLatInput" type="number" step="any" placeholder="46.4204" />
+            </label>
+            <label>Elevation
+              <input id="newRecordElevInput" type="number" step="any" placeholder="1540" />
+            </label>
+          </div>
+        </details>
+        <div id="newRecordResult" class="validation empty">Enter at least a facility id and title.</div>
+      </section>
+      <footer class="actions">
+        <button value="cancel" type="button" id="newRecordCancelBtn">Cancel</button>
+        <button value="ok" type="button" id="newRecordCreateBtn">Create facility</button>
+      </footer>
+    </form>
+  </dialog>
+
+
+  <dialog id="ownerContactModal">
+    <form method="dialog" class="modal-card owner-contact-dialog">
+      <header>
+        <h2 id="ownerContactModalTitle">Owner contact</h2>
+        <button value="cancel" aria-label="Close">×</button>
+      </header>
+      <section class="modal-body">
+        <p class="muted" id="ownerContactModalHelp">Assign an existing contact as facility owner, or create a new owner contact.</p>
+        <label>Existing contact
+          <select id="ownerContactSelect"></select>
+        </label>
+      </section>
+      <footer class="actions">
+        <button value="cancel" type="button" id="ownerContactCancelBtn">Cancel</button>
+        <button value="jump" type="button" id="ownerContactJumpBtn">Go to selected contact</button>
+        <button value="assign" type="button" id="ownerContactAssignBtn">Assign as owner</button>
+        <button value="new" type="button" id="ownerContactNewBtn">Add new owner contact</button>
+      </footer>
+    </form>
+  </dialog>
+
+
+  <dialog id="saveModal">
+    <form method="dialog" class="modal-card save-dialog">
+      <header>
+        <h2>Save WMDR2 record</h2>
+        <button value="cancel" aria-label="Close">×</button>
+      </header>
+      <section class="modal-body">
+        <p class="muted">Browser uploads do not expose the original local folder. This saves the record in the Node data directory; edit the server-side folder and file name below.</p>
+        <label>Server-side folder
+          <input id="saveLocationInput" placeholder="data/records" />
+        </label>
+        <label>File name
+          <input id="saveFileNameInput" placeholder="0-20000-0-06725.json" />
+        </label>
+        <div id="saveResult" class="validation empty">No save result yet.</div>
+      </section>
+      <footer class="actions">
+        <button value="cancel" type="button" id="saveCancelBtn">Cancel</button>
+        <button value="ok" type="button" id="saveConfirmBtn">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="jsonModal">
+    <form method="dialog" class="modal-card">
+      <header>
+        <h2 id="modalTitle">Edit JSON</h2>
+        <button value="cancel" aria-label="Close">×</button>
+      </header>
+      <textarea id="modalJson" class="code" rows="20" spellcheck="false"></textarea>
+      <footer class="actions">
+        <button value="cancel" type="button" id="modalCancelBtn">Cancel</button>
+        <button value="ok" type="button" id="modalApplyBtn">Apply</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div id="vocabularyDatalists" class="vocabulary-datalists" aria-hidden="true"></div>
+  <script src="static/app.js?v=0.2.0-field-validation" type="module"></script>
+</body>
+</html>
