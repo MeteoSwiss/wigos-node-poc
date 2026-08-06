@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>WIGOS Node PoC</title>
-  <link rel="stylesheet" href="static/styles.css?v=0.2.0-field-validation" />
+  <link rel="stylesheet" href="static/styles.css?v=0.3.0" />
 </head>
 <body>
   <header class="topbar">
@@ -12,21 +12,25 @@
       <h1>WIGOS Node PoC</h1>
       <p>Upload, review, edit, validate, and export a WMDR2 v0.3.x full record.</p>
     </div>
-    <div class="status" id="status">No record loaded</div>
+    <div class="topbar-actions">
+      <a class="button topbar-link" href="https://github.com/MeteoSwiss/wigos-node-poc/blob/main/README.md" target="_blank" rel="noopener">README</a>
+      <a class="button topbar-link" href="https://github.com/MeteoSwiss/wigos-node-poc/issues" target="_blank" rel="noopener">Feedback</a>
+      <div class="status" id="status">No record loaded</div>
+    </div>
   </header>
 
   <main class="layout">
     <aside class="panel upload-panel">
-      <h2>Create, choose or paste WMDR2 record</h2>
-      <p class="muted">Create a new WMDR2 facility record from a minimal template, or load an existing JSON file ...</p>
+      <h2>1. Start or submit WMDR2 record</h2>
       <div class="actions start-actions">
-        <button id="newRecordBtn" type="button">Create new record</button>
+        <button id="newRecordBtn" type="button">Start new facility</button>
       </div>
+      <p class="muted">Create a new WMDR2 facility record from a minimal template, or load an existing JSON file.</p>
       <label class="file-picker">
         <span>Choose JSON file</span>
         <input type="file" id="fileInput" accept="application/json,.json" />
       </label>
-      <p class="muted">... or paste a record below.</p>
+      <p class="muted">Or paste a record below.</p>
       <textarea id="pasteInput" class="code" rows="12" spellcheck="false" placeholder='{"type":"Feature", ...}'></textarea>
       <div class="actions">
         <button id="loadPasteBtn">Load pasted JSON</button>
@@ -82,20 +86,63 @@
               <input name="end" class="date-input" type="date" aria-label="Facility end date" title="Facility end date; blank is stored as .." />
             </label>
           </div>
+
           <div class="hidden-fields" aria-hidden="true">
             <input name="lon" type="hidden" />
             <input name="lat" type="hidden" />
             <input name="elev" type="hidden" />
           </div>
+
           <details class="subsection inline-details" id="temporalGeometryEditor">
-            <summary>Geolocation history <span id="temporalGeometryCount" class="badge">0</span></summary>
+            <summary>Geolocation <span id="temporalGeometryCount" class="badge">0</span></summary>
             <p class="muted">Edits the top-level <code>temporalGeometry</code> MovingPoint. The current top-level <code>geometry</code> is updated automatically from the latest complete row.</p>
             <div id="temporalGeometryList" class="list"></div>
             <div class="actions section-actions">
               <button id="addTemporalGeometryBtn" type="button">Add geolocation row</button>
             </div>
           </details>
+
+          <details class="subsection inline-details" id="territoryHistoryEditor">
+            <summary>Territory <span id="territoryCount" class="badge">0</span></summary>
+            <p class="muted">Edits <code>properties.territory</code> as dated territory assignments.</p>
+            <div id="territoryList" class="list"></div>
+            <div class="actions section-actions">
+              <button id="addTerritoryBtn" type="button">Add territory row</button>
+            </div>
+          </details>
+
           <label class="wide">Description <textarea name="description" rows="3"></textarea></label>
+
+          <details class="subsection inline-details" id="facilityDetailsEditor">
+            <summary>Additional facility metadata</summary>
+            <div class="facility-row facility-main-row">
+              <label>Facility type <select name="facilityType" class="vocab-select" data-vocabulary-select="facilityType"><option value="">— Select —</option></select></label>
+              <label>Additional titles <input name="additionalTitles" placeholder="Comma-separated names" /></label>
+              <label>Additional WSIs <input name="additionalIds" placeholder="Comma-separated WIGOS station identifiers" /></label>
+            </div>
+            <div class="facility-row facility-main-row">
+              <label>Keywords <input name="keywords" placeholder="Comma-separated keywords" /></label>
+              <label>Facility sets <input name="facilitySets" placeholder="Comma-separated sets" /></label>
+            </div>
+
+            <details class="subsection inline-details" id="facilityLinksEditor">
+              <summary>Facility links <span id="facilityLinkCount" class="badge">0</span></summary>
+              <p class="muted">Edits <code>properties.links</code>, for example an about page or related documentation.</p>
+              <div id="facilityLinksList" class="list"></div>
+              <div class="actions section-actions">
+                <button id="addFacilityLinkBtn" type="button">Add facility link</button>
+              </div>
+            </details>
+
+            <details class="subsection inline-details" id="environmentHistoryEditor">
+              <summary>Environment <span id="environmentCount" class="badge">0</span></summary>
+              <p class="muted">Edits <code>properties.environment</code>, including climate zone, surface cover classification, roughness, topography/bathymetry, and paired population/perimeter values.</p>
+              <div id="environmentList" class="list"></div>
+              <div class="actions section-actions">
+                <button id="addEnvironmentBtn" type="button">Add environment row</button>
+              </div>
+            </details>
+          </details>
         </form>
       </details>
 
@@ -117,6 +164,23 @@
         </summary>
         <p class="muted">WMDR2 v0.3.x no longer has facility-level deployments. The dated observing context is edited here from ObservationSeries observingConfigurations, including time interval, location context, serial number, and optional instrument references.</p>
         <div id="configurationsList" class="list"></div>
+      </details>
+
+      <details class="card" id="proceduresSection">
+        <summary>
+          <span>Procedures and schedules <span id="procedureCount" class="badge">0</span></span>
+          <button class="summary-action" data-open-modal="proceduresRaw" type="button">Edit JSON</button>
+        </summary>
+        <p class="muted">ObservingProcedures and ReportingProcedures live under each ObservationSeries. They reference reusable schedule objects from <code>properties.schedules</code>.</p>
+        <div id="proceduresList" class="list"></div>
+        <details class="subsection inline-details" id="schedulesEditor" open>
+          <summary>Reusable schedules <span id="scheduleCount" class="badge">0</span></summary>
+          <p class="muted">Schedules use JSCalendar-like event objects with <code>uid</code>, <code>start</code>, <code>duration</code>, and optional WMO sampling/aggregation extensions.</p>
+          <div id="schedulesList" class="list"></div>
+          <div class="actions section-actions">
+            <button id="addScheduleBtn" type="button">Add schedule</button>
+          </div>
+        </details>
       </details>
 
       <details class="card" id="instrumentsSection">
@@ -262,6 +326,6 @@
   </dialog>
 
   <div id="vocabularyDatalists" class="vocabulary-datalists" aria-hidden="true"></div>
-  <script src="static/app.js?v=0.2.0-field-validation" type="module"></script>
+  <script src="static/app.js?v=0.3.0" type="module"></script>
 </body>
 </html>

@@ -16,6 +16,7 @@ const TOP_LEVEL_SECTION_IDS = [
   'facilitySection',
   'observationsSection',
   'configurationsSection',
+  'proceduresSection',
   'instrumentsSection',
   'contactsSection',
   'fullRecordSection',
@@ -171,11 +172,148 @@ function multiCodeInputHtml(field, values, vocabularyName, label) {
         </span>`).join('')
     : '<span class="xref-empty">No values selected</span>';
   return `
-    <div class="multi-vocab" data-multi-vocab="${escapeAttr(field)}">
+    <div class="multi-vocab chip-picker" data-multi-vocab="${escapeAttr(field)}">
+      <input type="hidden" data-field="${escapeAttr(field)}" value="${escapeAttr(value)}" />
+      <div class="multi-vocab-values" aria-label="Selected ${escapeAttr(label || field)} values">
+        ${chips}
+        <button type="button" class="chip-add-button" data-toggle-add-vocab-target="${escapeAttr(field)}" aria-label="Add ${escapeAttr(label || field)} from list" title="Add from list">+</button>
+        <select class="vocab-select add-vocab-select chip-add-select" data-add-vocab-target="${escapeAttr(field)}" aria-label="Add ${escapeAttr(label || field)} from vocabulary" hidden>${selectHtml}</select>
+      </div>
+    </div>`;
+}
+
+
+function multiTextInputHtml(field, values, label) {
+  const currentValues = asArray(values).map(inputValue).filter(Boolean);
+  const value = currentValues.join(', ');
+  const chips = currentValues.length
+    ? currentValues.map(item => `
+        <span class="value-chip">
+          <span>${escapeHtml(item)}</span>
+          <button type="button" class="chip-remove" data-remove-text-target="${escapeAttr(field)}" data-remove-text-value="${escapeAttr(item)}" aria-label="Remove ${escapeAttr(item)}">×</button>
+        </span>`).join('')
+    : '<span class="xref-empty">No values selected</span>';
+  return `
+    <div class="multi-vocab multi-text" data-multi-text="${escapeAttr(field)}">
       <input type="hidden" data-field="${escapeAttr(field)}" value="${escapeAttr(value)}" />
       <div class="multi-vocab-values" aria-label="Selected ${escapeAttr(label || field)} values">${chips}</div>
-      <select class="vocab-select add-vocab-select" data-add-vocab-target="${escapeAttr(field)}" aria-label="Add ${escapeAttr(label || field)} from vocabulary">${selectHtml}</select>
+      <input class="inline-add-input" data-add-text-target="${escapeAttr(field)}" placeholder="Add ${escapeAttr(label || 'value')} and press Enter" />
     </div>`;
+}
+
+function appendTextChoice(input) {
+  const value = String(input.value ?? '').trim();
+  if (!value) return false;
+  const targetField = input.dataset.addTextTarget;
+  const scope = input.closest('[data-kind], [data-procedure-kind], [data-schedule-index], #facilityForm') || document;
+  const hidden = scope.querySelector(`input[type="hidden"][data-field="${cssAttrValue(targetField)}"]`);
+  if (!hidden) return false;
+  const values = splitValues(hidden.value);
+  if (!values.includes(value)) {
+    values.push(value);
+    hidden.value = values.join(', ');
+    hidden.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  input.value = '';
+  return true;
+}
+
+function removeTextChoice(button) {
+  const targetField = button.dataset.removeTextTarget;
+  const value = button.dataset.removeTextValue;
+  if (!targetField || !value) return false;
+  const scope = button.closest('[data-kind], [data-procedure-kind], [data-schedule-index], #facilityForm') || document;
+  const input = scope.querySelector(`input[type="hidden"][data-field="${cssAttrValue(targetField)}"]`);
+  if (!input) return false;
+  input.value = splitValues(input.value).filter(item => item !== value).join(', ');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+}
+
+function scheduleReferenceInputHtml(field, values, label) {
+  const currentValues = asArray(values).map(inputValue).filter(Boolean);
+  const value = currentValues.join(', ');
+  const schedules = asArray(props().schedules).map((schedule, index) => ({ uid: inputValue(schedule.uid), index })).filter(item => item.uid);
+  const scheduleIndex = new Map(schedules.map(item => [item.uid, item.index]));
+  const selectOptions = ['<option value="">Add schedule ref…</option>']
+    .concat(schedules.map(item => `<option value="${escapeAttr(item.uid)}">${escapeHtml(item.uid)}</option>`))
+    .join('');
+  const chips = currentValues.length
+    ? currentValues.map(item => {
+        const index = scheduleIndex.get(item);
+        const ref = index === undefined
+          ? `<span class="xref missing" title="No matching reusable schedule found">${escapeHtml(item)} ⚠</span>`
+          : `<a class="xref" href="#schedule-${index}" data-scroll-target="schedule-${index}" title="Go to reusable schedule ${escapeAttr(item)}">${escapeHtml(item)}</a>`;
+        return `
+          <span class="value-chip schedule-ref-chip">
+            ${ref}
+            <button type="button" class="chip-remove" data-remove-ref-target="${escapeAttr(field)}" data-remove-ref-value="${escapeAttr(item)}" aria-label="Remove ${escapeAttr(item)}">×</button>
+          </span>`;
+      }).join('')
+    : '<span class="xref-empty">No schedule references selected</span>';
+  return `
+    <div class="multi-vocab schedule-ref chip-picker" data-schedule-ref="${escapeAttr(field)}">
+      <input type="hidden" data-field="${escapeAttr(field)}" value="${escapeAttr(value)}" />
+      <div class="multi-vocab-values" aria-label="Selected ${escapeAttr(label || field)} references">
+        ${chips}
+        <button type="button" class="chip-add-button" data-toggle-add-ref-target="${escapeAttr(field)}" aria-label="Add ${escapeAttr(label || field)} reference" title="Add schedule reference">+</button>
+        <select class="vocab-select add-ref-select chip-add-select" data-add-ref-target="${escapeAttr(field)}" aria-label="Add ${escapeAttr(label || field)} reference" hidden>${selectOptions}</select>
+      </div>
+    </div>`;
+}
+
+function appendReferenceChoice(select) {
+  const value = select.value;
+  if (!value) return false;
+  const targetField = select.dataset.addRefTarget;
+  const scope = select.closest('[data-procedure-kind], [data-schedule-index], [data-kind], #facilityForm') || document;
+  const input = scope.querySelector(`input[type="hidden"][data-field="${cssAttrValue(targetField)}"]`);
+  if (!input) return false;
+  const values = splitValues(input.value);
+  if (!values.includes(value)) {
+    values.push(value);
+    input.value = values.join(', ');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  select.value = '';
+  return true;
+}
+
+function removeReferenceChoice(button) {
+  const targetField = button.dataset.removeRefTarget;
+  const value = button.dataset.removeRefValue;
+  if (!targetField || !value) return false;
+  const scope = button.closest('[data-procedure-kind], [data-schedule-index], [data-kind], #facilityForm') || document;
+  const input = scope.querySelector(`input[type="hidden"][data-field="${cssAttrValue(targetField)}"]`);
+  if (!input) return false;
+  input.value = splitValues(input.value).filter(item => item !== value).join(', ');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+}
+
+function showChipAddSelect(button, selector) {
+  const picker = button.closest('.chip-picker');
+  if (!picker) return false;
+  const select = picker.querySelector(selector);
+  if (!select) return false;
+  button.hidden = true;
+  select.hidden = false;
+  select.value = '';
+  select.focus();
+  if (typeof select.showPicker === 'function') {
+    try { select.showPicker(); } catch (_error) { /* Some browsers only allow showPicker in narrower user-activation cases. */ }
+  }
+  return true;
+}
+
+function hideChipAddSelect(select) {
+  if (!select?.matches?.('.chip-add-select')) return false;
+  const picker = select.closest('.chip-picker');
+  select.hidden = true;
+  select.value = '';
+  const button = picker?.querySelector('.chip-add-button');
+  if (button) button.hidden = false;
+  return true;
 }
 
 function appendVocabularyChoice(select) {
@@ -254,7 +392,7 @@ const exampleRecord = {
   properties: {
     type: 'facility',
     title: 'Blatten',
-    description: 'Example facility for OSCAR nextGen Node PoC.',
+    description: 'Example facility for WIGOS Node PoC.',
     wmoRegion: 'europe',
     keywords: ['0-20000-0-06725', 'Blatten'],
     contacts: [
@@ -270,7 +408,7 @@ const exampleRecord = {
       { time: { interval: ['2000-08-17', '..'] }, program: 'GOSGeneral', reportingStatus: 'operational' },
     ],
     territory: [{ time: { interval: ['2000-08-17', '..'] }, territory: 'CHE' }],
-    environment: [{ time: { interval: ['2000-08-17', '..'] }, surfaceCover: 'grassland' }],
+    environment: [{ time: { interval: ['2000-08-17', '..'] }, surfaceCover: { classificationScheme: 'igbp', classificationURI: 'http://codes.wmo.int/wmdr/SurfaceCoverClassification/igbp', value: 'grassland' }, surfaceRoughness: 'open', topographyBathymetry: { description: 'Example valley-floor terrain context.' } }],
     observationSeries: [
       {
         id: 'observationSeries:12006',
@@ -422,6 +560,7 @@ function renderAll() {
   renderFacility();
   renderObservationSeries();
   renderConfigurationsOverview();
+  renderProceduresSchedules();
   renderInstruments();
   renderContacts();
   $('recordRaw').value = pretty(state.record);
@@ -529,8 +668,25 @@ function validationTargetForPath(path) {
       const configPath = configMatch?.[2] || '';
       return configurationValidationTarget(seriesIndex, configIndex, configPath);
     }
+    if (rest.startsWith('observingProcedures[') || rest.startsWith('reportingProcedures[')) {
+      const procMatch = rest.match(/^(observingProcedures|reportingProcedures)\[(\d+)\](?:\.(.*))?$/);
+      const arrayName = procMatch?.[1] || 'observingProcedures';
+      const procIndex = procMatch ? Number(procMatch[2]) : 0;
+      const procPath = procMatch?.[3] || '';
+      return procedureValidationTarget(seriesIndex, arrayName, procIndex, procPath);
+    }
     return observationValidationTarget(seriesIndex, rest);
   }
+
+
+  match = path.match(/^\$\.properties\.territory\[(\d+)\](?:\.(.*))?$/);
+  if (match) return facilityCollectionValidationTarget('territory', Number(match[1]), validationFieldFromPath(match[2] || ''));
+
+  match = path.match(/^\$\.properties\.environment\[(\d+)\](?:\.(.*))?$/);
+  if (match) return facilityCollectionValidationTarget('environment', Number(match[1]), validationFieldFromPath(match[2] || ''));
+
+  match = path.match(/^\$\.properties\.schedules\[(\d+)\](?:\.(.*))?$/);
+  if (match) return scheduleValidationTarget(Number(match[1]), validationFieldFromPath(match[2] || ''));
 
   match = path.match(/^\$\.properties\.instruments\[(\d+)\](?:\.(.*))?$/);
   if (match) return itemValidationTarget('instrument', Number(match[1]), validationFieldFromPath(match[2] || ''));
@@ -559,6 +715,29 @@ function configurationValidationTarget(seriesIndex, configIndex, path) {
   return { scrollTarget: itemId, item, field: field ? form?.querySelector(`[data-field="${cssAttrValue(field)}"]`) : null };
 }
 
+
+function procedureValidationTarget(seriesIndex, arrayName, procIndex, fieldPath) {
+  const domId = arrayName === 'observingProcedures'
+    ? `observing-procedure-${seriesIndex}-${procIndex}`
+    : `reporting-procedure-${seriesIndex}-${procIndex}`;
+  const row = $(domId);
+  return { scrollTarget: domId, item: row, field: row?.querySelector(`[data-field="${cssAttrValue(validationFieldFromPath(fieldPath))}"]`) || row?.querySelector('[data-field]') || null };
+}
+
+function scheduleValidationTarget(index, fieldPath) {
+  const domId = `schedule-${index}`;
+  const row = $(domId);
+  return { scrollTarget: domId, item: row, field: row?.querySelector(`[data-field="${cssAttrValue(validationFieldFromPath(fieldPath))}"]`) || row?.querySelector('[data-field]') || null };
+}
+function facilityCollectionValidationTarget(kind, index, fieldPath) {
+  const idMap = { territory: `territory-${index}`, environment: `environment-${index}` };
+  const domId = idMap[kind] || `${kind}-${index}`;
+  const row = $(domId);
+  const field = validationFieldFromPath(fieldPath);
+  return { scrollTarget: domId, item: row, field: field ? row?.querySelector(`[data-field="${cssAttrValue(field)}"]`) : row?.querySelector('[data-field]') || null };
+}
+
+
 function itemValidationTarget(kind, index, field, itemId = itemDomId(kind, index)) {
   const item = $(itemId);
   const form = item?.querySelector(`[data-kind="${cssAttrValue(kind)}"]`);
@@ -571,6 +750,7 @@ function validationFieldFromPath(path) {
   if (normalized === 'time' || normalized === 'time.interval') return 'time.interval.0';
   if (normalized === 'observedFeature') return 'observedFeature.domain';
   if (normalized === 'verticalDistanceFromReferenceSurface') return 'verticalDistanceFromReferenceSurface.value';
+  if (normalized === 'surfaceCover') return 'surfaceCover.value';
   return normalized;
 }
 
@@ -581,6 +761,11 @@ function renderFacility() {
   form.elements.title.value = p.title || '';
   form.elements.description.value = p.description || '';
   setSelectValue(form.elements.wmoRegion, p.wmoRegion || '');
+  setSelectValue(form.elements.facilityType, p.facilityType || '');
+  form.elements.additionalTitles.value = asArray(p.additionalTitles).join(', ');
+  form.elements.additionalIds.value = asArray(p.additionalIds).join(', ');
+  form.elements.keywords.value = asArray(p.keywords).join(', ');
+  form.elements.facilitySets.value = asArray(p.facilitySets).join(', ');
   const coords = state.record.geometry?.coordinates || [];
   form.elements.lon.value = coords[0] ?? '';
   form.elements.lat.value = coords[1] ?? '';
@@ -589,6 +774,9 @@ function renderFacility() {
   form.elements.begin.value = isoDateOrEmpty(interval[0]);
   form.elements.end.value = isoDateOrEmpty(interval[1]);
   renderTemporalGeometryHistory();
+  renderTerritoryHistory();
+  renderEnvironmentHistory();
+  renderFacilityLinks();
   renderFacilityContactLinks();
 }
 
@@ -602,6 +790,12 @@ function syncFacilityForm() {
   p.description = form.elements.description.value;
   if (form.elements.wmoRegion.value.trim()) p.wmoRegion = form.elements.wmoRegion.value.trim();
   else delete p.wmoRegion;
+  if (form.elements.facilityType.value.trim()) p.facilityType = form.elements.facilityType.value.trim();
+  else delete p.facilityType;
+  setOptionalStringArray(p, 'additionalTitles', form.elements.additionalTitles.value);
+  setOptionalStringArray(p, 'additionalIds', form.elements.additionalIds.value);
+  setOptionalStringArray(p, 'keywords', form.elements.keywords.value);
+  setOptionalStringArray(p, 'facilitySets', form.elements.facilitySets.value);
   const lon = numberOrNull(form.elements.lon.value);
   const lat = numberOrNull(form.elements.lat.value);
   const elev = numberOrNull(form.elements.elev.value);
@@ -609,9 +803,371 @@ function syncFacilityForm() {
     state.record.geometry = { type: 'Point', coordinates: elev === null ? [lon, lat] : [lon, lat, elev] };
   }
   syncTemporalGeometryForms();
+  syncTerritoryForms();
+  syncEnvironmentForms();
+  syncFacilityLinkForms();
   const begin = form.elements.begin.value.trim() || '..';
   const end = form.elements.end.value.trim() || '..';
   state.record.time = { interval: [begin, end], resolution: state.record.time?.resolution || 'P1D' };
+}
+
+
+function setOptionalStringArray(target, key, raw) {
+  const values = splitValues(raw || '');
+  if (values.length) target[key] = values;
+  else delete target[key];
+}
+
+function timeBegin(item) {
+  return item?.time?.interval?.[0] ?? '..';
+}
+
+function timeEnd(item) {
+  return item?.time?.interval?.[1] ?? '..';
+}
+
+const DEFAULT_ENVIRONMENT_PERIMETERS_KM = [10, 50];
+
+function environmentPerimeters(row) {
+  const perimeters = asArray(row?.perimeter_km);
+  return DEFAULT_ENVIRONMENT_PERIMETERS_KM.map((fallback, index) => {
+    const parsed = numberOrNull(perimeters[index]);
+    return parsed === null ? fallback : parsed;
+  });
+}
+
+function hasPopulationValue(values) {
+  return asArray(values).some(value => value !== null && value !== undefined && value !== '');
+}
+
+function renderTerritoryHistory() {
+  const rows = asArray(props().territory);
+  const count = $('territoryCount');
+  const list = $('territoryList');
+  if (!count || !list) return;
+  count.textContent = rows.length;
+  list.innerHTML = rows.length ? `
+    <div class="table-wrap">
+      <table class="data-table facility-history-table">
+        <thead><tr><th>Begin</th><th>End</th><th>Territory</th><th>Actions</th></tr></thead>
+        <tbody>${rows.map(territoryRowHtml).join('')}</tbody>
+      </table>
+    </div>` : '<p class="muted">No territory history yet.</p>';
+}
+
+function territoryRowHtml(row, index) {
+  return `<tr data-facility-collection="territory" data-index="${index}" id="territory-${index}">
+    <td>${dateControlHtml('time.interval.0', timeBegin(row), `territory ${index + 1} begin`)}</td>
+    <td>${dateControlHtml('time.interval.1', timeEnd(row), `territory ${index + 1} end`)}</td>
+    <td>${codeInputHtml('territory', row.territory, 'territory', '— Select territory —')}</td>
+    <td><button class="small-button danger" data-delete-facility-row="territory:${index}" type="button">Delete</button></td>
+  </tr>`;
+}
+
+function syncTerritoryForms() {
+  const list = $('territoryList');
+  if (!list) return;
+  const rows = [...list.querySelectorAll('[data-facility-collection="territory"]')];
+  const values = rows.map(row => rowObjectFromFields(row, { coerce: true })).filter(item => item.territory || !isOpenInterval(item));
+  if (values.length) props().territory = values;
+  else delete props().territory;
+}
+
+
+function environmentPopulationHeaderPerimeters(rows) {
+  const rowWithPopulation = asArray(rows).find(row => hasPopulationValue(row?.population) && Array.isArray(row?.perimeter_km));
+  return environmentPerimeters(rowWithPopulation || null);
+}
+
+function surfaceCoverParts(surfaceCover) {
+  if (surfaceCover && typeof surfaceCover === 'object' && !Array.isArray(surfaceCover)) {
+    const scheme = inputValue(surfaceCover.classificationScheme || surfaceCover.classification || surfaceCover.scheme || '');
+    const uri = inputValue(surfaceCover.classificationURI || surfaceCover.schemeURI || surfaceCover.schemeUri || '');
+    const value = inputValue(surfaceCover.value ?? surfaceCover.code ?? surfaceCover.notation ?? '');
+    return { scheme, uri, value };
+  }
+  return { scheme: '', uri: '', value: inputValue(surfaceCover ?? '') };
+}
+
+function surfaceCoverClassificationUri(scheme) {
+  const text = inputValue(scheme).trim();
+  if (!text) return '';
+  if (/^https?:\/\//i.test(text)) return text;
+  return `http://codes.wmo.int/wmdr/SurfaceCoverClassification/${text}`;
+}
+
+const SURFACE_COVER_SCHEME_VOCABULARIES = {
+  globCover2009: { vocabulary: 'surfaceCoverGlobCover2009', register: 'SurfaceCoverGlobCover2009' },
+  igbp: { vocabulary: 'surfaceCoverIGBP', register: 'SurfaceCoverIGBP' },
+  lccs: { vocabulary: 'surfaceCoverLCCS', register: 'SurfaceCoverLCCS' },
+  pft: { vocabulary: 'surfaceCoverPFT', register: 'SurfaceCoverPFT' },
+  umd: { vocabulary: 'surfaceCoverUMD', register: 'SurfaceCoverUMD' },
+  laifpar: { vocabulary: 'surfaceCoverLAIFPAR', register: 'SurfaceCoverLAIFPAR' },
+  npp: { vocabulary: 'surfaceCoverNPP', register: 'SurfaceCoverNPP' },
+};
+
+function normalizedSurfaceCoverScheme(scheme) {
+  const text = inputValue(scheme).trim();
+  if (!text) return '';
+  return text.split('/').filter(Boolean).pop();
+}
+
+function surfaceCoverVocabularyForScheme(scheme) {
+  const key = normalizedSurfaceCoverScheme(scheme);
+  return SURFACE_COVER_SCHEME_VOCABULARIES[key]?.vocabulary || '';
+}
+
+function surfaceCoverRegisterForScheme(scheme) {
+  const key = normalizedSurfaceCoverScheme(scheme);
+  return SURFACE_COVER_SCHEME_VOCABULARIES[key]?.register || '';
+}
+
+function surfaceCoverValueUri(scheme, value) {
+  const register = surfaceCoverRegisterForScheme(scheme);
+  const code = inputValue(value).trim();
+  if (!register || !code) return '';
+  if (/^https?:\/\//i.test(code)) return code;
+  return `http://codes.wmo.int/wmdr/${register}/${code}`;
+}
+
+function surfaceCoverValueOptionsHtml(scheme, currentValue) {
+  const vocabName = surfaceCoverVocabularyForScheme(scheme);
+  const blankLabel = vocabName ? '— Select surface cover —' : '— Select classification first —';
+  if (!vocabName) {
+    const current = inputValue(currentValue).trim();
+    return current
+      ? `<option value="">${escapeHtml(blankLabel)}</option><option value="${escapeAttr(current)}" selected>${escapeHtml(`${current} — current value`)}</option>`
+      : `<option value="">${escapeHtml(blankLabel)}</option>`;
+  }
+  return selectOptionsHtml(vocabName, currentValue, { blankLabel });
+}
+
+function surfaceCoverValueSelectHtml(cover) {
+  const vocabName = surfaceCoverVocabularyForScheme(cover.scheme);
+  const disabled = vocabName ? '' : ' disabled';
+  return `<select class="vocab-select" data-field="surfaceCover.value" data-environment-surface-cover-value="1" data-surface-cover-vocab="${escapeAttr(vocabName)}"${disabled}>${surfaceCoverValueOptionsHtml(cover.scheme, cover.value)}</select>`;
+}
+
+function updateSurfaceCoverValueSelectForScheme(schemeSelect) {
+  const row = schemeSelect.closest('[data-facility-collection="environment"]');
+  if (!row) return;
+  const valueSelect = row.querySelector('[data-environment-surface-cover-value]');
+  if (!valueSelect) return;
+  const current = valueSelect.value;
+  const vocabName = surfaceCoverVocabularyForScheme(schemeSelect.value);
+  valueSelect.dataset.surfaceCoverVocab = vocabName;
+  valueSelect.disabled = !vocabName;
+  valueSelect.innerHTML = surfaceCoverValueOptionsHtml(schemeSelect.value, current);
+  setSelectValue(valueSelect, current);
+}
+
+function surfaceCoverObjectFromRow(row) {
+  const scheme = inputValue(row.querySelector('[data-environment-surface-cover-scheme]')?.value || '').trim();
+  const value = inputValue(row.querySelector('[data-environment-surface-cover-value]')?.value || '').trim();
+  if (!scheme && !value) return null;
+  const result = {};
+  if (scheme) {
+    result.classificationScheme = scheme;
+    result.classificationURI = surfaceCoverClassificationUri(scheme);
+  }
+  if (value) {
+    result.value = valueOrNumber(value);
+    const valueUri = surfaceCoverValueUri(scheme, value);
+    if (valueUri) result.valueURI = valueUri;
+  }
+  return result;
+}
+
+function topographyBathymetryParts(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return {
+    localTopography: inputValue(value.localTopography ?? value.local_topography ?? ''),
+    relativeElevation: inputValue(value.relativeElevation ?? value.relative_elevation ?? ''),
+    topographicContext: inputValue(value.topographicContext ?? value.topographic_context ?? ''),
+    altitudeOrDepth: inputValue(value.altitudeOrDepth ?? value.altitude_or_depth ?? ''),
+  };
+}
+
+function topographyBathymetryObjectFromRow(row) {
+  const fields = ['localTopography', 'relativeElevation', 'topographicContext', 'altitudeOrDepth'];
+  const result = {};
+  fields.forEach(field => {
+    const value = inputValue(row.querySelector(`[data-topography-bathymetry="${field}"]`)?.value || '').trim();
+    if (value) result[field] = valueOrNumber(value);
+  });
+  return Object.keys(result).length ? result : null;
+}
+
+function renderEnvironmentHistory() {
+  const rows = asArray(props().environment);
+  const count = $('environmentCount');
+  const list = $('environmentList');
+  if (!count || !list) return;
+  count.textContent = rows.length;
+  const populationHeaders = environmentPopulationHeaderPerimeters(rows);
+  list.innerHTML = rows.length
+    ? `<div class="environment-card-list">${rows.map((row, index) => environmentRowHtml({ ...row, __index: index }, populationHeaders)).join('')}</div>`
+    : '<p class="muted">No environment metadata yet.</p>';
+  populateStaticVocabularySelects(list);
+}
+
+function environmentRowHtml(row, headerPerimeters) {
+  const index = Number(row?.__index ?? 0);
+  const population = asArray(row.population);
+  const perimeters = hasPopulationValue(population) ? environmentPerimeters(row) : headerPerimeters;
+  const cover = surfaceCoverParts(row.surfaceCover);
+  const topo = topographyBathymetryParts(row.topographyBathymetry);
+  const title = `Environment ${index + 1}`;
+  return `<div class="facility-row-card environment-row-card" data-facility-collection="environment" data-index="${index}" id="environment-${index}">
+    <div class="row-card-header">
+      <strong>${escapeHtml(title)}</strong>
+      <button class="small-button danger" data-delete-facility-row="environment:${index}" type="button">Delete</button>
+    </div>
+    <div class="facility-row facility-date-row environment-date-row">
+      <label>Begin ${dateControlHtml('time.interval.0', timeBegin(row), `${title} begin`)}</label>
+      <label>End ${dateControlHtml('time.interval.1', timeEnd(row), `${title} end`)}</label>
+    </div>
+    <div class="facility-row environment-classification-row">
+      <label>Climate zone ${codeInputHtml('climateZone', row.climateZone, 'climateZone')}</label>
+      <label>Surface roughness ${codeInputHtml('surfaceRoughness', row.surfaceRoughness, 'surfaceRoughness', '— Select Davenport roughness —')}</label>
+    </div>
+    <div class="facility-row environment-surface-cover-row">
+      <label>Surface cover classification ${codeInputHtml('surfaceCover.classificationScheme', cover.scheme, 'surfaceCoverClassification', '— Select classification —').replace('data-field="surfaceCover.classificationScheme"', 'data-field="surfaceCover.classificationScheme" data-environment-surface-cover-scheme="1"')}</label>
+      <label>Surface cover code ${surfaceCoverValueSelectHtml(cover)}</label>
+    </div>
+    <div class="facility-row environment-population-row">
+      <label>Population within ${escapeHtml(perimeters[0])} km
+        <input data-field="population.0" data-environment-population="0" data-environment-perimeter="${escapeAttr(perimeters[0])}" type="number" step="any" value="${escapeAttr(population[0] ?? '')}" />
+      </label>
+      <label>Population within ${escapeHtml(perimeters[1])} km
+        <input data-field="population.1" data-environment-population="1" data-environment-perimeter="${escapeAttr(perimeters[1])}" type="number" step="any" value="${escapeAttr(population[1] ?? '')}" />
+      </label>
+    </div>
+    <div class="environment-topography-block">
+      <div class="subtle-heading">Topography/bathymetry</div>
+      <div class="facility-row environment-topography-row">
+        <label>Local topography ${codeInputHtml('topographyBathymetry.localTopography', topo.localTopography, 'localTopography', '— Select local topography —').replace('data-field="topographyBathymetry.localTopography"', 'data-field="topographyBathymetry.localTopography" data-topography-bathymetry="localTopography"')}</label>
+        <label>Relative elevation ${codeInputHtml('topographyBathymetry.relativeElevation', topo.relativeElevation, 'relativeElevation', '— Select relative elevation —').replace('data-field="topographyBathymetry.relativeElevation"', 'data-field="topographyBathymetry.relativeElevation" data-topography-bathymetry="relativeElevation"')}</label>
+        <label>Topographic context ${codeInputHtml('topographyBathymetry.topographicContext', topo.topographicContext, 'topographicContext', '— Select context —').replace('data-field="topographyBathymetry.topographicContext"', 'data-field="topographyBathymetry.topographicContext" data-topography-bathymetry="topographicContext"')}</label>
+        <label>Altitude/depth ${codeInputHtml('topographyBathymetry.altitudeOrDepth', topo.altitudeOrDepth, 'altitudeOrDepth', '— Select altitude/depth —').replace('data-field="topographyBathymetry.altitudeOrDepth"', 'data-field="topographyBathymetry.altitudeOrDepth" data-topography-bathymetry="altitudeOrDepth"')}</label>
+      </div>
+    </div>
+  </div>`;
+}
+
+function syncEnvironmentForms() {
+  const list = $('environmentList');
+  if (!list) return;
+  const rows = [...list.querySelectorAll('[data-facility-collection="environment"]')];
+  const values = rows.map(row => {
+    const item = rowObjectFromFields(row, { coerce: true, numberArrays: ['population'] });
+    const surfaceCover = surfaceCoverObjectFromRow(row);
+    if (surfaceCover === null) delete item.surfaceCover;
+    else item.surfaceCover = surfaceCover;
+    const topography = topographyBathymetryObjectFromRow(row);
+    if (topography) item.topographyBathymetry = topography;
+    else delete item.topographyBathymetry;
+    const population = [0, 1].map(index => numberOrNull(row.querySelector(`[data-environment-population="${index}"]`)?.value ?? ''));
+    if (hasPopulationValue(population)) {
+      item.population = population;
+      item.perimeter_km = [0, 1].map(index => {
+        const input = row.querySelector(`[data-environment-population="${index}"]`);
+        return numberOrNull(input?.dataset.environmentPerimeter) ?? DEFAULT_ENVIRONMENT_PERIMETERS_KM[index];
+      });
+    } else {
+      delete item.population;
+      delete item.perimeter_km;
+    }
+    return item;
+  }).filter(item => Object.keys(item).some(key => key !== 'time') || !isOpenInterval(item));
+  if (values.length) props().environment = values;
+  else delete props().environment;
+}
+
+function renderFacilityLinks() {
+  const rows = asArray(props().links);
+  const count = $('facilityLinkCount');
+  const list = $('facilityLinksList');
+  if (!count || !list) return;
+  count.textContent = rows.length;
+  list.innerHTML = rows.length ? `
+    <div class="table-wrap">
+      <table class="data-table facility-link-table">
+        <thead><tr><th>Href</th><th>Rel</th><th>Type</th><th>Title</th><th>Actions</th></tr></thead>
+        <tbody>${rows.map(facilityLinkRowHtml).join('')}</tbody>
+      </table>
+    </div>` : '<p class="muted">No facility links yet.</p>';
+}
+
+function facilityLinkRowHtml(row, index) {
+  return `<tr data-facility-collection="facilityLink" data-index="${index}" id="facility-link-${index}">
+    <td><input data-field="href" value="${escapeAttr(row.href || '')}" placeholder="https://…" /></td>
+    <td><input data-field="rel" value="${escapeAttr(row.rel || '')}" placeholder="about" /></td>
+    <td><input data-field="type" value="${escapeAttr(row.type || '')}" placeholder="text/html" /></td>
+    <td><input data-field="title" value="${escapeAttr(row.title || '')}" /></td>
+    <td><button class="small-button danger" data-delete-facility-row="facilityLink:${index}" type="button">Delete</button></td>
+  </tr>`;
+}
+
+function syncFacilityLinkForms() {
+  const list = $('facilityLinksList');
+  if (!list) return;
+  const rows = [...list.querySelectorAll('[data-facility-collection="facilityLink"]')];
+  const values = rows.map(row => rowObjectFromFields(row, { coerce: false })).filter(item => item.href || item.rel || item.type || item.title);
+  if (values.length) props().links = values;
+  else delete props().links;
+}
+
+function rowObjectFromFields(row, options = {}) {
+  const item = {};
+  row.querySelectorAll('[data-field]').forEach(input => {
+    const field = input.dataset.field;
+    let value = input.value;
+    if (field === 'time.interval.0' || field === 'time.interval.1') value = value || '..';
+    else if (options.coerce) value = valueOrJsonOrNumber(String(value ?? '').trim());
+    else value = String(value ?? '').trim();
+    setField(item, field, value);
+  });
+  if (options.numberArrays) {
+    options.numberArrays.forEach(key => {
+      if (Array.isArray(item[key])) {
+        item[key] = item[key].map(value => value === '' || value === undefined ? null : value);
+        if (item[key].every(value => value === null)) delete item[key];
+      }
+    });
+  }
+  return item;
+}
+
+function isOpenInterval(item) {
+  const interval = item?.time?.interval;
+  return Array.isArray(interval) && (interval[0] || '..') === '..' && (interval[1] || '..') === '..';
+}
+
+function addFacilityCollectionRow(kind) {
+  syncFacilityForm();
+  if (kind === 'territory') {
+    const rows = props().territory ??= [];
+    rows.push({ territory: '', time: { interval: [state.record.time?.interval?.[0] || '..', '..'] } });
+    state.pendingScrollTarget = `territory-${rows.length - 1}`;
+  } else if (kind === 'environment') {
+    const rows = props().environment ??= [];
+    rows.push({ time: { interval: [state.record.time?.interval?.[0] || '..', '..'] }, perimeter_km: [...DEFAULT_ENVIRONMENT_PERIMETERS_KM] });
+    state.pendingScrollTarget = `environment-${rows.length - 1}`;
+  } else if (kind === 'facilityLink') {
+    const rows = props().links ??= [];
+    rows.push({ href: '', rel: 'about', type: 'text/html' });
+    state.pendingScrollTarget = `facility-link-${rows.length - 1}`;
+  }
+  renderAll();
+}
+
+function deleteFacilityCollectionRow(kind, index) {
+  syncFacilityForm();
+  if (kind === 'territory') props().territory?.splice(index, 1);
+  if (kind === 'environment') props().environment?.splice(index, 1);
+  if (kind === 'facilityLink') props().links?.splice(index, 1);
+  renderAll();
 }
 
 function temporalGeometryRows() {
@@ -835,6 +1391,7 @@ function observationSeriesFormHtml(obs, index) {
     </div>
     ${observationConfigurationLinksHtml(obs, index)}
     ${observationInstrumentLinksHtml(obs)}
+    ${observationProcedureLinksHtml(obs, index)}
     ${observationContactLinksHtml(obs)}
     <div class="actions section-actions">
       <button type="button" data-add-config="${index}">Add observing configuration</button>
@@ -872,6 +1429,20 @@ function observationInstrumentLinksHtml(obs) {
   const instrumentIndex = indexByUid('instrument');
   const links = observationInstrumentRefs(obs).map(ref => linkToItem('instrument', instrumentIndex.get(ref), ref));
   return xrefRow('Linked instruments', links, 'No instrument refs in observingConfigurations');
+}
+
+function procedureCollectionDomId(kind, seriesIndex) {
+  return `${kind}-procedures-${seriesIndex}`;
+}
+
+function observationProcedureLinksHtml(obs, seriesIndex) {
+  const observingCount = observingProcedures(obs).length;
+  const reportingCount = reportingProcedures(obs).length;
+  const links = [
+    `<a class="xref" href="#${procedureCollectionDomId('observing', seriesIndex)}" data-scroll-target="${procedureCollectionDomId('observing', seriesIndex)}">ObservingProcedures (${observingCount})</a>`,
+    `<a class="xref" href="#${procedureCollectionDomId('reporting', seriesIndex)}" data-scroll-target="${procedureCollectionDomId('reporting', seriesIndex)}">ReportingProcedures (${reportingCount})</a>`,
+  ];
+  return xrefRow('Procedures and schedules', links, 'No procedure section');
 }
 
 function renderConfigurationsOverview() {
@@ -925,6 +1496,268 @@ function configurationCrossLinksHtml(obs, config, seriesIndex) {
   const obsLink = linkToItem('observationSeries', seriesIndex, entityId(obs) || obs.title || `ObservationSeries ${seriesIndex + 1}`);
   const instrumentLinks = config.instrument ? [linkToItem('instrument', instrumentIndex.get(config.instrument), config.instrument)] : [];
   return `${xrefRow('Belongs to', [obsLink], 'No ObservationSeries')}${xrefRow('Linked instrument', instrumentLinks, 'No instrument ref')}`;
+}
+
+
+function observingProcedures(obs) {
+  return asArray(obs.observingProcedures);
+}
+
+function reportingProcedures(obs) {
+  return asArray(obs.reportingProcedures ?? obs.reporting);
+}
+
+function renderProceduresSchedules() {
+  const series = asArray(props().observationSeries);
+  const scheduleCount = asArray(props().schedules).length;
+  const procedureTotal = series.reduce((count, obs) => count + observingProcedures(obs).length + reportingProcedures(obs).length, 0);
+  const badge = $('procedureCount');
+  if (badge) badge.textContent = procedureTotal + scheduleCount;
+  const list = $('proceduresList');
+  if (list) {
+    list.innerHTML = series.length
+      ? series.map((obs, index) => proceduresForObservationHtml(obs, index)).join('')
+      : '<p class="muted">No ObservationSeries yet. Add an ObservationSeries before adding observing or reporting procedures.</p>';
+  }
+  renderSchedules();
+}
+
+function proceduresForObservationHtml(obs, seriesIndex) {
+  const id = entityId(obs) || `ObservationSeries ${seriesIndex + 1}`;
+  const label = observationSeriesHeaderTitle(obs, seriesIndex);
+  return `<article class="item procedure-card" id="procedures-${seriesIndex}" data-item-kind="procedures" data-series-index="${seriesIndex}">
+    <div class="item-header">
+      <div>
+        <div class="item-title">Procedures and schedules for ${escapeHtml(label)}</div>
+        <div class="item-subtitle">ObservationSeries: ${escapeHtml(id)}</div>
+      </div>
+      <div class="actions">
+        ${linkToItem('observationSeries', seriesIndex, 'Back to ObservationSeries')}
+      </div>
+    </div>
+    <section class="procedure-block" id="${procedureCollectionDomId('observing', seriesIndex)}">
+      <div class="procedure-block-heading">
+        <h4>ObservingProcedures</h4>
+        <span class="muted">for ${escapeHtml(label)}</span>
+      </div>
+      ${observingProceduresTableHtml(obs, seriesIndex)}
+      <div class="actions section-actions"><button type="button" data-add-procedure="observing:${seriesIndex}">Add observing procedure</button></div>
+    </section>
+    <section class="procedure-block" id="${procedureCollectionDomId('reporting', seriesIndex)}">
+      <div class="procedure-block-heading">
+        <h4>ReportingProcedures</h4>
+        <span class="muted">for ${escapeHtml(label)}</span>
+      </div>
+      ${reportingProceduresTableHtml(obs, seriesIndex)}
+      <div class="actions section-actions"><button type="button" data-add-procedure="reporting:${seriesIndex}">Add reporting procedure</button></div>
+    </section>
+  </article>`;
+}
+
+function observingProceduresTableHtml(obs, seriesIndex) {
+  const rows = observingProcedures(obs);
+  if (!rows.length) return '<p class="muted">No observingProcedures yet.</p>';
+  return `<div class="table-wrap"><table class="data-table procedure-table">
+    <thead><tr><th>Begin</th><th>End</th><th>Strategy</th><th>Observing schedules</th><th>Actions</th></tr></thead>
+    <tbody>${rows.map((row, index) => observingProcedureRowHtml(row, seriesIndex, index)).join('')}</tbody>
+  </table></div>`;
+}
+
+function observingProcedureRowHtml(row, seriesIndex, procIndex) {
+  return `<tr id="observing-procedure-${seriesIndex}-${procIndex}" data-procedure-kind="observingProcedure" data-series-index="${seriesIndex}" data-procedure-index="${procIndex}">
+    <td>${dateControlHtml('time.interval.0', timeBegin(row), `observing procedure ${procIndex + 1} begin`)}</td>
+    <td>${dateControlHtml('time.interval.1', timeEnd(row), `observing procedure ${procIndex + 1} end`)}</td>
+    <td>${codeInputHtml('strategy', row.strategy, 'observingStrategy')}</td>
+    <td>${scheduleReferenceInputHtml('observingSchedules', row.observingSchedules, 'observing schedules')}</td>
+    <td><button class="small-button" data-json-procedure="observing:${seriesIndex}:${procIndex}" type="button">Edit JSON</button> <button class="small-button danger" data-delete-procedure="observing:${seriesIndex}:${procIndex}" type="button">Delete</button></td>
+  </tr>`;
+}
+
+function reportingProceduresTableHtml(obs, seriesIndex) {
+  const rows = reportingProcedures(obs);
+  if (!rows.length) return '<p class="muted">No reportingProcedures yet.</p>';
+  return `<div class="table-wrap"><table class="data-table procedure-table">
+    <thead><tr><th>Exchange</th><th>Data policy</th><th>Level</th><th>UoM</th><th>Timeliness</th><th>N obs</th><th>Reporting schedules</th><th>Actions</th></tr></thead>
+    <tbody>${rows.map((row, index) => reportingProcedureRowHtml(row, seriesIndex, index)).join('')}</tbody>
+  </table></div>`;
+}
+
+function reportingProcedureRowHtml(row, seriesIndex, procIndex) {
+  return `<tr id="reporting-procedure-${seriesIndex}-${procIndex}" data-procedure-kind="reportingProcedure" data-series-index="${seriesIndex}" data-procedure-index="${procIndex}">
+    <td><select class="vocab-select" data-field="internationalExchange"><option value="">—</option><option value="true"${row.internationalExchange === true ? ' selected' : ''}>true</option><option value="false"${row.internationalExchange === false ? ' selected' : ''}>false</option></select></td>
+    <td>${codeInputHtml('dataPolicy', row.dataPolicy, 'dataPolicy')}</td>
+    <td>${codeInputHtml('levelOfData', row.levelOfData, 'levelOfData')}</td>
+    <td>${codeInputHtml('uom', row.uom, 'unit')}</td>
+    <td><input data-field="timeliness" value="${escapeAttr(row.timeliness ?? '')}" placeholder="P1Y" /></td>
+    <td><input data-field="numberOfObservationsInReportingInterval" value="${escapeAttr(row.numberOfObservationsInReportingInterval ?? '')}" /></td>
+    <td>${scheduleReferenceInputHtml('reportingSchedules', row.reportingSchedules, 'reporting schedules')}</td>
+    <td><button class="small-button" data-json-procedure="reporting:${seriesIndex}:${procIndex}" type="button">Edit JSON</button> <button class="small-button danger" data-delete-procedure="reporting:${seriesIndex}:${procIndex}" type="button">Delete</button></td>
+  </tr>`;
+}
+
+function renderSchedules() {
+  const schedules = asArray(props().schedules);
+  const count = $('scheduleCount');
+  const list = $('schedulesList');
+  if (count) count.textContent = schedules.length;
+  if (!list) return;
+  list.innerHTML = schedules.length ? `<div class="table-wrap"><table class="data-table schedule-table">
+    <thead><tr><th>UID</th><th>Start</th><th>Duration</th><th>Sampling frequency</th><th>Aggregation interval</th><th>Diurnal base time</th><th>Used by</th><th>Actions</th></tr></thead>
+    <tbody>${schedules.map(scheduleRowHtml).join('')}</tbody>
+  </table></div>` : '<p class="muted">No reusable schedules yet.</p>';
+}
+
+function scheduleUsageLinksHtml(uid) {
+  const value = inputValue(uid);
+  if (!value) return '<span class="xref-empty">No UID yet</span>';
+  const links = [];
+  asArray(props().observationSeries).forEach((obs, seriesIndex) => {
+    const obsLabel = entityId(obs) || `ObservationSeries ${seriesIndex + 1}`;
+    observingProcedures(obs).forEach((procedure, procIndex) => {
+      if (asArray(procedure.observingSchedules).map(inputValue).includes(value)) {
+        const target = `observing-procedure-${seriesIndex}-${procIndex}`;
+        links.push(`<a class="xref" href="#${target}" data-scroll-target="${target}" title="Go to observing procedure using ${escapeAttr(value)}">${escapeHtml(obsLabel)} · observing ${procIndex + 1}</a>`);
+      }
+    });
+    reportingProcedures(obs).forEach((procedure, procIndex) => {
+      if (asArray(procedure.reportingSchedules).map(inputValue).includes(value)) {
+        const target = `reporting-procedure-${seriesIndex}-${procIndex}`;
+        links.push(`<a class="xref" href="#${target}" data-scroll-target="${target}" title="Go to reporting procedure using ${escapeAttr(value)}">${escapeHtml(obsLabel)} · reporting ${procIndex + 1}</a>`);
+      }
+    });
+  });
+  return links.length
+    ? `<div class="schedule-usage-links">${links.join('')}</div>`
+    : '<span class="xref-empty">Not referenced</span>';
+}
+
+function scheduleRowHtml(schedule, index) {
+  return `<tr id="schedule-${index}" data-schedule-index="${index}">
+    <td><input data-field="uid" value="${escapeAttr(schedule.uid || '')}" placeholder="schedule_…" /></td>
+    <td><input data-field="start" value="${escapeAttr(schedule.start || '')}" placeholder="0001-01-01T00:00:00" /></td>
+    <td><input data-field="duration" value="${escapeAttr(schedule.duration || '')}" placeholder="PT23H59M" /></td>
+    <td><input data-field="wmo.int:samplingFrequency" value="${escapeAttr(schedule['wmo.int:samplingFrequency'] || '')}" placeholder="PT10M" /></td>
+    <td><input data-field="wmo.int:aggregationInterval" value="${escapeAttr(schedule['wmo.int:aggregationInterval'] || '')}" placeholder="PT1H" /></td>
+    <td><input data-field="wmo.int:diurnalBaseTime" value="${escapeAttr(schedule['wmo.int:diurnalBaseTime'] || '')}" placeholder="00:00:00" /></td>
+    <td>${scheduleUsageLinksHtml(schedule.uid)}</td>
+    <td><button class="small-button" data-json-schedule="${index}" type="button">Edit JSON</button> <button class="small-button danger" data-delete-schedule="${index}" type="button">Delete</button></td>
+  </tr>`;
+}
+
+function syncProceduresAndSchedulesForms() {
+  document.querySelectorAll('[data-procedure-kind="observingProcedure"]').forEach(row => {
+    const seriesIndex = Number(row.dataset.seriesIndex);
+    const procIndex = Number(row.dataset.procedureIndex);
+    const target = props().observationSeries?.[seriesIndex]?.observingProcedures?.[procIndex];
+    if (!target) return;
+    syncFieldsIntoTarget(row, target);
+  });
+  document.querySelectorAll('[data-procedure-kind="reportingProcedure"]').forEach(row => {
+    const seriesIndex = Number(row.dataset.seriesIndex);
+    const procIndex = Number(row.dataset.procedureIndex);
+    const obs = props().observationSeries?.[seriesIndex];
+    const target = obs?.reportingProcedures?.[procIndex];
+    if (!target) return;
+    syncFieldsIntoTarget(row, target);
+  });
+  document.querySelectorAll('[data-schedule-index]').forEach(row => {
+    const index = Number(row.dataset.scheduleIndex);
+    const target = props().schedules?.[index];
+    if (!target) return;
+    syncFieldsIntoTarget(row, target);
+    target['@type'] ||= 'Event';
+  });
+}
+
+function syncFieldsIntoTarget(container, target) {
+  container.querySelectorAll('[data-field]').forEach(input => {
+    setField(target, input.dataset.field, coerceField(input.dataset.field, input.value));
+  });
+}
+
+function addProcedure(kind, seriesIndex) {
+  syncFacilityForm();
+  syncItemForms();
+  const obs = props().observationSeries?.[seriesIndex];
+  if (!obs) return;
+  if (kind === 'observing') {
+    const rows = obs.observingProcedures ??= [];
+    rows.push({ time: { interval: [state.record.time?.interval?.[0] || '..', '..'] }, observingSchedules: [] });
+    state.pendingScrollTarget = `observing-procedure-${seriesIndex}-${rows.length - 1}`;
+  } else if (kind === 'reporting') {
+    const rows = obs.reportingProcedures ??= [];
+    rows.push({ internationalExchange: null, reportingSchedules: [] });
+    state.pendingScrollTarget = `reporting-procedure-${seriesIndex}-${rows.length - 1}`;
+  }
+  renderAll();
+}
+
+function deleteProcedure(kind, seriesIndex, procIndex) {
+  syncFacilityForm();
+  syncItemForms();
+  const obs = props().observationSeries?.[seriesIndex];
+  if (!obs) return;
+  if (kind === 'observing') obs.observingProcedures?.splice(procIndex, 1);
+  if (kind === 'reporting') obs.reportingProcedures?.splice(procIndex, 1);
+  renderAll();
+}
+
+function uniqueScheduleUid() {
+  const existing = new Set(asArray(props().schedules).map(item => item.uid).filter(Boolean));
+  let next = existing.size + 1;
+  let uid = `schedule_new_${next}`;
+  while (existing.has(uid)) {
+    next += 1;
+    uid = `schedule_new_${next}`;
+  }
+  return uid;
+}
+
+function addSchedule() {
+  syncFacilityForm();
+  syncItemForms();
+  const schedules = props().schedules ??= [];
+  schedules.push({ uid: uniqueScheduleUid(), '@type': 'Event', start: '0001-01-01T00:00:00', duration: 'PT23H59M' });
+  state.pendingScrollTarget = `schedule-${schedules.length - 1}`;
+  renderAll();
+}
+
+function deleteSchedule(index) {
+  syncFacilityForm();
+  syncItemForms();
+  props().schedules?.splice(index, 1);
+  renderAll();
+}
+
+function proceduresSectionJson() {
+  return {
+    observationSeries: asArray(props().observationSeries).map((obs, index) => ({
+      observationSeries: entityId(obs) || index,
+      observingProcedures: asArray(obs.observingProcedures),
+      reportingProcedures: asArray(obs.reportingProcedures ?? obs.reporting),
+    })),
+    schedules: asArray(props().schedules),
+  };
+}
+
+function applyProceduresSectionJson(value) {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => applyProcedureEntry(entry, index));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    if (Array.isArray(value.schedules)) props().schedules = value.schedules;
+    asArray(value.observationSeries).forEach((entry, index) => applyProcedureEntry(entry, index));
+  }
+}
+
+function applyProcedureEntry(entry, fallbackIndex) {
+  const series = asArray(props().observationSeries);
+  const key = entry?.observationSeries;
+  const index = key ? series.findIndex(obs => entityId(obs) === key) : fallbackIndex;
+  if (index < 0 || !series[index]) return;
+  if (Array.isArray(entry.observingProcedures)) series[index].observingProcedures = entry.observingProcedures;
+  if (Array.isArray(entry.reportingProcedures)) series[index].reportingProcedures = entry.reportingProcedures;
 }
 
 function renderInstruments() {
@@ -1130,6 +1963,7 @@ function syncItemForms() {
     });
     cleanupObservingConfiguration(target);
   });
+  syncProceduresAndSchedulesForms();
 }
 
 function cleanupObservingConfiguration(config) {
@@ -1201,13 +2035,18 @@ function pruneEmptyAncestors(ancestors) {
 function coerceField(field, value) {
   const trimmed = String(value ?? '').trim();
   if (field === 'time.interval.0' || field === 'time.interval.1') return trimmed || '..';
-  if (['programAffiliations', 'applicationAreas', 'observingMethods', 'roles'].includes(field)) {
+  if (['programAffiliations', 'applicationAreas', 'observingMethods', 'roles', 'observingSchedules', 'reportingSchedules', 'dataFormat', 'referenceTimeSource', 'additionalTitles', 'additionalIds', 'keywords', 'facilitySets'].includes(field)) {
     return splitValues(trimmed).map(valueOrNumber);
   }
   if (['emails', 'phones'].includes(field)) {
     return splitValues(trimmed);
   }
-  if (['observedProperty', 'observedGeometry', 'observingMethod', 'operatingStatus', 'sourceOfObservation', 'exposure'].includes(field) || field.endsWith('.domain') || field.endsWith('.value')) {
+  if (field === 'internationalExchange') {
+    if (trimmed === 'true') return true;
+    if (trimmed === 'false') return false;
+    return null;
+  }
+  if (['observedProperty', 'observedGeometry', 'observingMethod', 'operatingStatus', 'sourceOfObservation', 'exposure', 'referenceSurface', 'facilityType', 'territory', 'climateZone', 'surfaceCover', 'surfaceRoughness', 'strategy', 'dataPolicy', 'levelOfData', 'uom', 'spatialReportingInterval', 'timeStampMeaning'].includes(field) || field.endsWith('.domain') || field.endsWith('.value')) {
     return valueOrJsonOrNumber(trimmed);
   }
   return trimmed;
@@ -1608,24 +2447,37 @@ function focusSection(sectionId, options = {}) {
   if (section && scroll) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+function closeOtherTopLevelSections(openSection) {
+  if (!openSection?.matches?.('details.card') || !TOP_LEVEL_SECTION_IDS.includes(openSection.id)) return;
+  TOP_LEVEL_SECTION_IDS.forEach(id => {
+    if (id !== openSection.id) {
+      const section = $(id);
+      if (section) section.open = false;
+    }
+  });
+}
+
 function scrollToItem(targetId) {
   const target = $(targetId);
   if (!target) return;
   const topLevelDetails = target.matches('details.card') ? target : target.closest('details.card');
   if (topLevelDetails?.id) focusSection(topLevelDetails.id, { scroll: false });
-  else {
-    const details = target.closest('details');
-    if (details) details.open = true;
+  let ancestor = target.parentElement;
+  while (ancestor) {
+    if (ancestor.tagName === 'DETAILS') ancestor.open = true;
+    ancestor = ancestor.parentElement;
   }
-  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const isTableRow = target.tagName === 'TR';
+  target.scrollIntoView({ behavior: 'smooth', block: isTableRow ? 'center' : 'start', inline: 'nearest' });
   target.classList.add('flash');
-  window.setTimeout(() => target.classList.remove('flash'), 1600);
+  window.setTimeout(() => target.classList.remove('flash'), 1800);
 }
 
 function refreshRelationshipViews() {
   renderFacility();
   renderObservationSeries();
   renderConfigurationsOverview();
+  renderProceduresSchedules();
   renderInstruments();
   renderContacts();
   $('recordRaw').value = pretty(state.record);
@@ -1639,6 +2491,7 @@ function applyModal() {
     Object.assign(props(), omit(value.properties ? value.properties : value, ['observationSeries', 'instruments', 'contacts', 'schedules']));
   } else if (target === 'observationSeriesRaw') props().observationSeries = ensureArray(value, 'observationSeries');
   else if (target === 'configurationsRaw') applyConfigurationsSectionJson(value);
+  else if (target === 'proceduresRaw') applyProceduresSectionJson(value);
   else if (target === 'instrumentsRaw') props().instruments = ensureArray(value, 'instruments');
   else if (target === 'contactsRaw') props().contacts = ensureArray(value, 'contacts');
   else if (target?.startsWith('item:')) {
@@ -1647,6 +2500,13 @@ function applyModal() {
   } else if (target?.startsWith('config:')) {
     const [, seriesText, configText] = target.split(':');
     props().observationSeries[Number(seriesText)].observingConfigurations[Number(configText)] = value;
+  } else if (target?.startsWith('procedure:')) {
+    const [, kind, seriesText, procText] = target.split(':');
+    const arrayName = kind === 'observing' ? 'observingProcedures' : 'reportingProcedures';
+    props().observationSeries[Number(seriesText)][arrayName][Number(procText)] = value;
+  } else if (target?.startsWith('schedule:')) {
+    const [, indexText] = target.split(':');
+    props().schedules[Number(indexText)] = value;
   }
   $('jsonModal').close();
   renderAll();
@@ -1726,6 +2586,10 @@ $('addObservationBtn').addEventListener('click', () => addItem('observationSerie
 $('addInstrumentBtn').addEventListener('click', () => addItem('instrument'));
 $('addContactBtn').addEventListener('click', () => addItem('contact'));
 $('addTemporalGeometryBtn').addEventListener('click', () => addTemporalGeometryRow());
+$('addTerritoryBtn').addEventListener('click', () => addFacilityCollectionRow('territory'));
+$('addEnvironmentBtn').addEventListener('click', () => addFacilityCollectionRow('environment'));
+$('addFacilityLinkBtn').addEventListener('click', () => addFacilityCollectionRow('facilityLink'));
+$('addScheduleBtn').addEventListener('click', () => addSchedule());
 $('modalCancelBtn').addEventListener('click', () => $('jsonModal').close());
 $('modalApplyBtn').addEventListener('click', () => {
   try { applyModal(); } catch (error) { alert(error.message); }
@@ -1742,6 +2606,19 @@ $('ownerContactNewBtn').addEventListener('click', () => addOwnerContact());
 // Keep old development data from throwing if an old HTML is cached.
 const oldAddDeployment = $('addDeploymentBtn');
 if (oldAddDeployment) oldAddDeployment.addEventListener('click', () => alert('WMDR2 v0.3.x no longer has facility-level deployments. Use observingConfigurations instead.'));
+
+document.addEventListener('toggle', event => {
+  const section = event.target;
+  if (section?.matches?.('details.card') && section.open) closeOtherTopLevelSections(section);
+}, true);
+
+document.body.addEventListener('focusout', event => {
+  const select = event.target.closest?.('.chip-add-select');
+  if (!select) return;
+  window.setTimeout(() => {
+    if (!select.value && !select.contains(document.activeElement)) hideChipAddSelect(select);
+  }, 120);
+});
 
 document.body.addEventListener('click', event => {
   const summaryModalButton = event.target.closest('summary [data-open-modal]');
@@ -1763,6 +2640,18 @@ document.body.addEventListener('click', event => {
     return;
   }
 
+  const addVocabButton = event.target.closest('[data-toggle-add-vocab-target]');
+  if (addVocabButton) {
+    showChipAddSelect(addVocabButton, 'select[data-add-vocab-target]');
+    return;
+  }
+
+  const addRefButton = event.target.closest('[data-toggle-add-ref-target]');
+  if (addRefButton) {
+    showChipAddSelect(addRefButton, 'select[data-add-ref-target]');
+    return;
+  }
+
   const removeVocab = event.target.closest('[data-remove-vocab-target]');
   if (removeVocab) {
     if (removeVocabularyChoice(removeVocab)) {
@@ -1770,6 +2659,54 @@ document.body.addEventListener('click', event => {
       syncItemForms();
       renderAll();
     }
+    return;
+  }
+
+
+  const removeText = event.target.closest('[data-remove-text-target]');
+  if (removeText) {
+    if (removeTextChoice(removeText)) {
+      syncFacilityForm();
+      syncItemForms();
+      renderAll();
+    }
+    return;
+  }
+
+  const removeRef = event.target.closest('[data-remove-ref-target]');
+  if (removeRef) {
+    if (removeReferenceChoice(removeRef)) {
+      syncFacilityForm();
+      syncItemForms();
+      renderAll();
+    }
+    return;
+  }
+
+  const deleteFacilityRow = event.target.closest('[data-delete-facility-row]');
+  if (deleteFacilityRow) {
+    const [kind, indexText] = deleteFacilityRow.dataset.deleteFacilityRow.split(':');
+    deleteFacilityCollectionRow(kind, Number(indexText));
+    return;
+  }
+
+  const addProcedureButton = event.target.closest('[data-add-procedure]');
+  if (addProcedureButton) {
+    const [kind, seriesText] = addProcedureButton.dataset.addProcedure.split(':');
+    addProcedure(kind, Number(seriesText));
+    return;
+  }
+
+  const deleteProcedureButton = event.target.closest('[data-delete-procedure]');
+  if (deleteProcedureButton) {
+    const [kind, seriesText, procText] = deleteProcedureButton.dataset.deleteProcedure.split(':');
+    deleteProcedure(kind, Number(seriesText), Number(procText));
+    return;
+  }
+
+  const deleteScheduleButton = event.target.closest('[data-delete-schedule]');
+  if (deleteScheduleButton) {
+    deleteSchedule(Number(deleteScheduleButton.dataset.deleteSchedule));
     return;
   }
 
@@ -1809,6 +2746,7 @@ document.body.addEventListener('click', event => {
       facilityRaw: ['Facility JSON', { id: state.record.id, geometry: state.record.geometry, temporalGeometry: state.record.temporalGeometry, time: state.record.time, conformsTo: state.record.conformsTo, properties: omit(props(), ['observationSeries', 'instruments', 'contacts', 'schedules']) }],
       observationSeriesRaw: ['ObservationSeries JSON', props().observationSeries ?? []],
       configurationsRaw: ['Observing configurations JSON', configurationsSectionJson()],
+      proceduresRaw: ['Procedures and schedules JSON', proceduresSectionJson()],
       instrumentsRaw: ['Instruments JSON', props().instruments ?? []],
       contactsRaw: ['Contacts JSON', props().contacts ?? []],
     };
@@ -1841,6 +2779,38 @@ document.body.addEventListener('click', event => {
     const [seriesIndex, configIndex] = jsonConfigButton.dataset.jsonConfig.split(':').map(Number);
     openModal(`config:${seriesIndex}:${configIndex}`, 'ObservingConfiguration JSON', props().observationSeries[seriesIndex].observingConfigurations[configIndex]);
   }
+
+  const jsonProcedureButton = event.target.closest('[data-json-procedure]');
+  if (jsonProcedureButton) {
+    syncFacilityForm();
+    syncItemForms();
+    const [kind, seriesText, procText] = jsonProcedureButton.dataset.jsonProcedure.split(':');
+    const seriesIndex = Number(seriesText);
+    const procIndex = Number(procText);
+    const obs = props().observationSeries[seriesIndex];
+    const arrayName = kind === 'observing' ? 'observingProcedures' : 'reportingProcedures';
+    openModal(`procedure:${kind}:${seriesIndex}:${procIndex}`, `${arrayName} JSON`, obs[arrayName][procIndex]);
+  }
+
+  const jsonScheduleButton = event.target.closest('[data-json-schedule]');
+  if (jsonScheduleButton) {
+    syncFacilityForm();
+    syncItemForms();
+    const index = Number(jsonScheduleButton.dataset.jsonSchedule);
+    openModal(`schedule:${index}`, 'Schedule JSON', props().schedules[index]);
+  }
+});
+
+
+document.body.addEventListener('keydown', event => {
+  const addTextInput = event.target.closest?.('[data-add-text-target]');
+  if (!addTextInput || event.key !== 'Enter') return;
+  event.preventDefault();
+  if (appendTextChoice(addTextInput)) {
+    syncFacilityForm();
+    syncItemForms();
+    renderAll();
+  }
 });
 
 document.body.addEventListener('input', event => {
@@ -1860,6 +2830,16 @@ document.body.addEventListener('input', event => {
 });
 
 document.body.addEventListener('change', event => {
+  const refAppend = event.target.closest?.('select[data-add-ref-target]');
+  if (refAppend) {
+    if (appendReferenceChoice(refAppend)) {
+      syncFacilityForm();
+      syncItemForms();
+      renderAll();
+    }
+    return;
+  }
+
   const vocabAppend = event.target.closest?.('select[data-add-vocab-target]');
   if (vocabAppend) {
     if (appendVocabularyChoice(vocabAppend)) {
@@ -1877,6 +2857,10 @@ document.body.addEventListener('change', event => {
   }
   const field = event.target?.dataset?.field;
   if (!field) return;
+
+  if (event.target.matches?.('[data-environment-surface-cover-scheme]')) {
+    updateSurfaceCoverValueSelectForScheme(event.target);
+  }
 
   syncFacilityForm();
   syncItemForms();

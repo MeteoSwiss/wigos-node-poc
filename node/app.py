@@ -14,9 +14,9 @@ from .validation import normalize_record, validate_record
 from .vocabularies import get_all_vocabularies, get_vocabulary
 
 app = FastAPI(
-    title="OSCAR nextGen Node PoC",
-    version="0.2.0",
-    description="Local PoC node for upload, review/edit, validation, and export of WMDR2 v0.3.x full records.",
+    title="WIGOS Node PoC",
+    version="0.3.0",
+    description="WIGOS Node PoC for upload, review/edit, validation, and export of WMDR2 v0.3.x full records.",
 )
 app.add_middleware(
     CORSMiddleware,

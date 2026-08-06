@@ -176,6 +176,189 @@ VOCABULARY_SPECS: tuple[VocabularySpec, ...] = (
             {"value": "Pa", "label": "pascal"},
         ),
     ),
+    VocabularySpec(
+        "facilityType",
+        "Facility type",
+        "FacilityType",
+        (
+            {"value": "landFixed", "label": "Land fixed"},
+            {"value": "landMobile", "label": "Land mobile"},
+            {"value": "seaFixed", "label": "Sea fixed"},
+            {"value": "seaMobile", "label": "Sea mobile"},
+            {"value": "airborne", "label": "Airborne"},
+        ),
+    ),
+    VocabularySpec(
+        "territory",
+        "Territory",
+        None,
+        (
+            {"value": "CHE", "label": "Switzerland"},
+            {"value": "GRC", "label": "Greece"},
+            {"value": "KEN", "label": "Kenya"},
+            {"value": "USA", "label": "United States of America"},
+            {"value": "DEU", "label": "Germany"},
+            {"value": "FRA", "label": "France"},
+            {"value": "ITA", "label": "Italy"},
+        ),
+    ),
+    VocabularySpec(
+        "climateZone",
+        "Climate zone",
+        "ClimateZone",
+        (
+            {"value": "polar", "label": "Polar"},
+            {"value": "temperate", "label": "Temperate"},
+            {"value": "subtropical", "label": "Subtropical"},
+            {"value": "tropical", "label": "Tropical"},
+            {"value": "arid", "label": "Arid"},
+        ),
+    ),
+    VocabularySpec(
+        "surfaceCoverClassification",
+        "Surface cover classification scheme",
+        "SurfaceCoverClassification",
+        (),
+    ),
+    VocabularySpec(
+        "surfaceCoverGlobCover2009",
+        "Surface cover types (GlobCover2009)",
+        "SurfaceCoverGlobCover2009",
+        (),
+    ),
+    VocabularySpec(
+        "surfaceCoverIGBP",
+        "Surface cover types (IGBP)",
+        "SurfaceCoverIGBP",
+        (),
+    ),
+    VocabularySpec(
+        "surfaceCoverLCCS",
+        "Surface cover types (LCCS)",
+        "SurfaceCoverLCCS",
+        (),
+    ),
+    VocabularySpec(
+        "surfaceCoverPFT",
+        "Surface cover types (PFT)",
+        "SurfaceCoverPFT",
+        (),
+    ),
+    VocabularySpec(
+        "surfaceCoverUMD",
+        "Surface cover types (UMD)",
+        "SurfaceCoverUMD",
+        (),
+    ),
+    VocabularySpec(
+        "surfaceCoverLAIFPAR",
+        "Surface cover types (LAI/fPAR)",
+        "SurfaceCoverLAIFPAR",
+        (),
+    ),
+    VocabularySpec(
+        "surfaceCoverNPP",
+        "Surface cover types (NPP)",
+        "SurfaceCoverNPP",
+        (),
+    ),
+    VocabularySpec(
+        "surfaceRoughness",
+        "Surface roughness (Davenport)",
+        "SurfaceRoughnessDavenport",
+        (),
+    ),
+    VocabularySpec(
+        "localTopography",
+        "Local topography",
+        "LocalTopography",
+        (),
+    ),
+    VocabularySpec(
+        "relativeElevation",
+        "Relative elevation",
+        "RelativeElevation",
+        (),
+    ),
+    VocabularySpec(
+        "topographicContext",
+        "Topographic context",
+        "TopographicContext",
+        (),
+    ),
+    VocabularySpec(
+        "altitudeOrDepth",
+        "Altitude/depth",
+        "AltitudeOrDepth",
+        (),
+    ),
+    VocabularySpec(
+        "observingStrategy",
+        "Observing strategy",
+        "ObservingStrategy",
+        (
+            {"value": "continuous", "label": "Continuous"},
+            {"value": "periodic", "label": "Periodic"},
+            {"value": "eventDriven", "label": "Event driven"},
+            {"value": "onDemand", "label": "On demand"},
+        ),
+    ),
+    VocabularySpec(
+        "dataPolicy",
+        "Data policy",
+        "DataPolicy",
+        (
+            {"value": "noLimitation", "label": "No limitation"},
+            {"value": "essential", "label": "Essential"},
+            {"value": "additional", "label": "Additional"},
+            {"value": "restricted", "label": "Restricted"},
+        ),
+    ),
+    VocabularySpec(
+        "levelOfData",
+        "Level of data",
+        "LevelOfData",
+        (
+            {"value": "level0", "label": "Level 0"},
+            {"value": "level1", "label": "Level 1"},
+            {"value": "level2", "label": "Level 2"},
+            {"value": "level3", "label": "Level 3"},
+        ),
+    ),
+    VocabularySpec(
+        "referenceTimeSource",
+        "Reference time source",
+        "ReferenceTimeSource",
+        (
+            {"value": "timeServer", "label": "Time server"},
+            {"value": "gps", "label": "GPS"},
+            {"value": "localClock", "label": "Local clock"},
+        ),
+        multiple=True,
+    ),
+    VocabularySpec(
+        "timeStampMeaning",
+        "Timestamp meaning",
+        "TimestampMeaning",
+        (
+            {"value": "beginning", "label": "Beginning of interval"},
+            {"value": "middle", "label": "Middle of interval"},
+            {"value": "end", "label": "End of interval"},
+        ),
+    ),
+    VocabularySpec(
+        "dataFormat",
+        "Data format",
+        "DataFormat",
+        (
+            {"value": "BUFR", "label": "BUFR"},
+            {"value": "CREX", "label": "CREX"},
+            {"value": "netCDF", "label": "netCDF"},
+            {"value": "csv", "label": "CSV"},
+            {"value": "json", "label": "JSON"},
+        ),
+        multiple=True,
+    ),
 )
 
 _CACHE: dict[str, Any] | None = None
@@ -313,7 +496,7 @@ def _read_url(url: str, *, accept: str) -> tuple[bytes, str]:
         url,
         headers={
             "Accept": accept,
-            "User-Agent": "oscar-nextgen-node-poc/0.2.0 (+https://github.com/MeteoSwiss)",
+            "User-Agent": "oscar-nextgen-node-poc/0.3.0 (+https://github.com/MeteoSwiss)",
         },
     )
     with urlopen(request, timeout=_REMOTE_TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed public registry URLs
