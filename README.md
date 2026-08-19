@@ -253,6 +253,10 @@ pytest -q
 
 The current consolidated PoC version is **0.3.0**. 
 
+## Architecture
+
+For a description of the architecture, see [architecture.md](architecture.md). For a visual overview, see [architecturediagram.png](architecture-diagram.png). The main components are:
+
 ## Feedback and contributions
 
 Feedback and contributions are highly welcome. Please open issues or pull requests regarding this web service on this GitHub repository at [https://github.com/MeteoSwiss/wigos-node-poc](https://github.com/MeteoSwiss/wigos-node-poc). Try to be specific about the use case, the WMDR2 element, and the expected behavior. If you have a sample record or JSON snippet that illustrates the issue, please include it in your report. If you have clever ideas for improving the user interface, please describe them in detail or provide a mockup.
