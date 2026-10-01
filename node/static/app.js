@@ -470,13 +470,6 @@ function parseJson(text, label = 'JSON') {
 }
 
 
-function valueOrNumber(value) {
-  const text = String(value ?? '').trim();
-  if (text === '') return '';
-  const asNumber = Number(text);
-  return Number.isFinite(asNumber) && String(asNumber) === text ? asNumber : value;
-}
-
 function valueOrJsonOrNumber(value) {
   const text = String(value ?? '').trim();
   if (text === '') return '';
@@ -1196,16 +1189,34 @@ function deleteFacilityCollectionRow(kind, index) {
 
 function temporalGeometryRows() {
   const tg = state.record?.temporalGeometry;
-  if (!tg || tg.type !== 'MovingPoint') return [];
-  const coordinates = asArray(tg.coordinates);
-  const dates = asArray(tg.dates);
-  const methods = asArray(tg.methods);
-  const count = Math.max(coordinates.length, dates.length, methods.length);
-  return Array.from({ length: count }, (_, index) => ({
-    coordinates: asArray(coordinates[index]),
-    date: dates[index] ?? '..',
-    methods: asArray(methods[index]),
-  }));
+  if (tg && tg.type === 'MovingPoint') {
+    const coordinates = asArray(tg.coordinates);
+    const dates = asArray(tg.dates);
+    const methods = asArray(tg.methods);
+    const count = Math.max(coordinates.length, dates.length, methods.length);
+    if (count > 0) {
+      return Array.from({ length: count }, (_, index) => ({
+        coordinates: asArray(coordinates[index]),
+        date: dates[index] ?? '..',
+        methods: asArray(methods[index]),
+        derivedFromGeometry: false,
+      }));
+    }
+  }
+
+  const geometry = state.record?.geometry;
+  const coordinates = geometry?.type === 'Point' && Array.isArray(geometry.coordinates)
+    ? geometry.coordinates.slice(0, 3)
+    : null;
+  if (isCompleteCoordinate(coordinates)) {
+    return [{
+      coordinates,
+      date: state.record?.time?.interval?.[0] ?? '..',
+      methods: [],
+      derivedFromGeometry: true,
+    }];
+  }
+  return [];
 }
 
 function renderTemporalGeometryHistory() {
@@ -1216,7 +1227,7 @@ function renderTemporalGeometryHistory() {
   count.textContent = rows.length;
   if (!rows.length) {
     state.selectedTemporalGeometryIndex = null;
-    list.innerHTML = '<p class="muted">No temporalGeometry history yet. Add a row from the current facility geometry.</p>';
+    list.innerHTML = '<p class="muted">No current facility geometry or temporalGeometry history yet. Add a row once coordinates are known.</p>';
     return;
   }
   if (state.selectedTemporalGeometryIndex === null || state.selectedTemporalGeometryIndex >= rows.length) {
@@ -1239,16 +1250,18 @@ function renderTemporalGeometryHistory() {
         <tbody>${rows.map((row, index) => temporalGeometryRowHtml(row, index)).join('')}</tbody>
       </table>
     </div>
-    <p class="muted">Select a row to focus it, edit values directly in the table, or add another row from the current facility coordinates.</p>`;
+    <p class="muted">The table shows temporalGeometry history when present. If the record only has top-level GeoJSON geometry, the current point is shown as a derived editable row and remains stored as geometry until a temporal history is created.</p>`;
 }
 
 function temporalGeometryRowHtml(row, index) {
   const coordinates = row.coordinates;
   const selected = state.selectedTemporalGeometryIndex === index;
+  const derived = row.derivedFromGeometry ? '1' : '0';
+  const sourceLabel = row.derivedFromGeometry ? 'Current geometry' : (selected ? 'Editing' : 'Edit');
   return `
-    <tr class="temporal-geometry-item ${selected ? 'selected' : ''}" id="${temporalGeometryDomId(index)}" data-item-kind="temporalGeometry" data-kind="temporalGeometry" data-index="${index}" data-temporal-geometry-index="${index}">
+    <tr class="temporal-geometry-item ${selected ? 'selected' : ''}" id="${temporalGeometryDomId(index)}" data-item-kind="temporalGeometry" data-kind="temporalGeometry" data-index="${index}" data-temporal-geometry-index="${index}" data-derived-from-geometry="${derived}">
       <td>
-        <button class="small-button" data-select-temporal-geometry="${index}" type="button" aria-pressed="${selected ? 'true' : 'false'}">${selected ? 'Editing' : 'Edit'}</button>
+        <button class="small-button" data-select-temporal-geometry="${index}" type="button" aria-pressed="${selected ? 'true' : 'false'}">${escapeHtml(sourceLabel)}</button>
       </td>
       <td><label class="sr-only">Date for geolocation row ${index + 1}</label><input data-field="date" placeholder="YYYY-MM-DD or .." value="${escapeAttr(row.date || '..')}" /></td>
       <td><label class="sr-only">Longitude for geolocation row ${index + 1}</label><input data-field="lon" type="number" step="any" value="${escapeAttr(coordinates[0] ?? '')}" /></td>
@@ -1281,6 +1294,28 @@ function syncTemporalGeometryForms() {
     dates.push((field('date')?.value || '').trim() || '..');
     methods.push(splitValues(field('methods')?.value || ''));
   });
+
+  const hasExistingTemporalGeometry = state.record.temporalGeometry?.type === 'MovingPoint';
+  const derivedCurrentGeometryOnly = !hasExistingTemporalGeometry
+    && forms.length === 1
+    && forms[0].dataset.derivedFromGeometry === '1'
+    && methods.every(method => !method.length)
+    && (dates[0] || '..') === (state.record?.time?.interval?.[0] ?? '..');
+
+  if (derivedCurrentGeometryOnly) {
+    delete state.record.temporalGeometry;
+    const coordinate = coordinates[0];
+    if (isCompleteCoordinate(coordinate)) {
+      state.record.geometry = {
+        type: 'Point',
+        coordinates: coordinate.slice(0, 3).map(value => Number.isFinite(Number(value)) ? Number(value) : value),
+      };
+    } else {
+      state.record.geometry = null;
+    }
+    return;
+  }
+
   state.record.temporalGeometry = { type: 'MovingPoint', coordinates, dates, methods };
   updateCurrentGeometryFromLatestTemporalGeometry();
 }
@@ -1347,7 +1382,15 @@ function addTemporalGeometryRow() {
 function ensureTemporalGeometry() {
   const existing = state.record.temporalGeometry;
   if (!existing || typeof existing !== 'object' || existing.type !== 'MovingPoint') {
-    state.record.temporalGeometry = { type: 'MovingPoint', coordinates: [], dates: [], methods: [] };
+    const geometryCoordinates = state.record?.geometry?.type === 'Point' && Array.isArray(state.record.geometry.coordinates)
+      ? state.record.geometry.coordinates.slice(0, 3)
+      : null;
+    state.record.temporalGeometry = {
+      type: 'MovingPoint',
+      coordinates: isCompleteCoordinate(geometryCoordinates) ? [geometryCoordinates] : [],
+      dates: isCompleteCoordinate(geometryCoordinates) ? [state.record?.time?.interval?.[0] ?? '..'] : [],
+      methods: isCompleteCoordinate(geometryCoordinates) ? [[]] : [],
+    };
   }
   const tg = state.record.temporalGeometry;
   tg.type = 'MovingPoint';
@@ -1358,6 +1401,17 @@ function ensureTemporalGeometry() {
 }
 
 function deleteTemporalGeometryRow(index) {
+  const list = $('temporalGeometryList');
+  const row = list?.querySelector(`[data-temporal-geometry-index="${index}"]`);
+  const wasDerivedCurrentGeometry = row?.dataset.derivedFromGeometry === '1'
+    && state.record?.temporalGeometry?.type !== 'MovingPoint';
+  if (wasDerivedCurrentGeometry) {
+    state.record.geometry = null;
+    state.selectedTemporalGeometryIndex = null;
+    renderAll();
+    return;
+  }
+
   syncFacilityForm();
   const tg = state.record.temporalGeometry;
   if (!tg) return;

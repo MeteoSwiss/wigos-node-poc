@@ -410,6 +410,13 @@ def _normalize_observing_procedure(value: Any) -> Any:
 
 def _normalize_reporting_procedure(value: Any) -> Any:
     proc = dict(value) if isinstance(value, dict) else {}
+
+    if "internationalExchange" not in proc:
+        proc["internationalExchange"] = False
+
+    if "dataPolicy" not in proc or proc.get("dataPolicy") == "":
+        proc["dataPolicy"] = None
+
     for key, register in (
         ("dataPolicy", "dataPolicy"),
         ("levelOfData", "levelOfData"),
@@ -419,16 +426,19 @@ def _normalize_reporting_procedure(value: Any) -> Any:
     ):
         if proc.get(key) not in (None, ""):
             proc[key] = _concept_or_null(proc.get(key), register)
+
     if proc.get("dataFormat"):
         proc["dataFormat"] = [_concept(item, "dataFormat") for item in _as_list(proc.get("dataFormat"))]
+
     if proc.get("referenceTimeSource"):
         proc["referenceTimeSource"] = [_concept(item) for item in _as_list(proc.get("referenceTimeSource"))]
+
     if "spatialReportingInterval" in proc and "temporalReportingInterval" not in proc:
         proc["temporalReportingInterval"] = proc.pop("spatialReportingInterval")
+
     proc.pop("time", None)
     proc.pop("date", None)
     return proc
-
 
 def _normalize_environment(value: Any) -> Any:
     item = _date_to_time_interval(value)
