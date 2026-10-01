@@ -51,7 +51,7 @@ class RecordStore:
         elif section in {"observationSeries", "observations", "instruments", "contacts", "schedules"}:
             if not isinstance(value, list):
                 raise ValueError(f"{section} section must be an array")
-            canonical = "observationSeries" if section == "observations" else section
+            canonical = "observations" if section in {"observations", "observationSeries"} else section
             props[canonical] = value
         else:
             raise ValueError(f"Unsupported section: {section}")
@@ -95,6 +95,8 @@ class RecordStore:
         for key in ("id", "geometry", "temporalGeometry", "time", "conformsTo"):
             if key in value:
                 record[key] = value[key]
+        if "links" in value:
+            record["links"] = value["links"]
         for key in (
             "type",
             "title",
@@ -105,6 +107,7 @@ class RecordStore:
             "wmoRegion",
             "timeZone",
             "regionOfOrigin",
+            "territories",
             "territory",
             "programAffiliations",
             "environment",

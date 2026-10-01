@@ -47,10 +47,10 @@ def test_patch_observations_legacy_section_name(tmp_path, monkeypatch):
             "/api/records/0-20000-0-X/sections/observations",
             json=[
                 {
-                    "id": "observationSeries:1",
+                    "id": "observation:1",
                     "observedProperty": 1,
                     "observedFeature": {"domain": "atmosphere"},
-                    "observingConfigurations": [
+                    "configurations": [
                         {
                             "time": {"interval": ["2024-01-01", ".."]},
                             "observingMethod": 1,
@@ -60,7 +60,7 @@ def test_patch_observations_legacy_section_name(tmp_path, monkeypatch):
             ],
         )
         assert response.status_code == 200
-        assert response.json()["record"]["properties"]["observationSeries"][0]["id"] == "observationSeries:1"
+        assert response.json()["record"]["properties"]["observations"][0]["id"] == "observation:1"
 
 
 def test_save_as_writes_named_file_under_data_dir(tmp_path, monkeypatch):

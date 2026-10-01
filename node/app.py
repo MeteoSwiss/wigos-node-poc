@@ -15,8 +15,8 @@ from .vocabularies import get_all_vocabularies, get_vocabulary
 
 app = FastAPI(
     title="WIGOS Node PoC",
-    version="0.3.0",
-    description="WIGOS Node PoC for upload, review/edit, validation, and export of WMDR2 v0.3.x full records.",
+    version="0.4.0",
+    description="WIGOS Node PoC for upload, review/edit, validation, and export of WMDR2 v0.4.0 full records.",
 )
 app.add_middleware(
     CORSMiddleware,

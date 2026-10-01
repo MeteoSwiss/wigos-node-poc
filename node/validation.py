@@ -13,6 +13,45 @@ WSI_RE = re.compile(r"^(0|1|2|3)-([1-9]\d*)-([0-9]+)-([A-Za-z0-9._-]+)$")
 PREFIXED_WSI_RE = re.compile(r"^(?:wsi|facility|record):(0|1|2|3)-([1-9]\d*)-([0-9]+)-([A-Za-z0-9._-]+)$")
 INSTRUMENT_PREFIX = "instrument:"
 
+VOCAB_URL_BASES = {
+    "facilityType": "http://codes.wmo.int/wmdr/FacilityType/",
+    "wmoRegion": "http://codes.wmo.int/wmdr/WMORegion/",
+    "territory": "http://codes.wmo.int/wmdr/TerritoryName/",
+    "observedProperty": "http://codes.wmo.int/wmdr/ObservedVariableAtmosphere/",
+    "observedGeometry": "http://codes.wmo.int/wmdr/Geometry/",
+    "domain": "http://codes.wmo.int/wmdr/Domain/",
+    "programAffiliation": "http://codes.wmo.int/wmdr/ProgramAffiliation/",
+    "reportingStatus": "http://codes.wmo.int/wmdr/ReportingStatus/",
+    "applicationAreas": "http://codes.wmo.int/wmdr/ApplicationArea/",
+    "observingMethod": "http://codes.wmo.int/wmdr/ObservingMethodAtmosphere/",
+    "operatingStatus": "http://codes.wmo.int/wmdr/InstrumentOperatingStatus/",
+    "sourceOfObservation": "http://codes.wmo.int/wmdr/SourceOfObservation/",
+    "exposure": "http://codes.wmo.int/wmdr/Exposure/",
+    "referenceSurface": "http://codes.wmo.int/wmdr/ReferenceSurfaceType/",
+    "unit": "http://codes.wmo.int/wmdr/unit/",
+    "observingMethods": "http://codes.wmo.int/wmdr/ObservingMethodAtmosphere/",
+    "dataFormat": "http://codes.wmo.int/wmdr/DataFormat/",
+    "dataPolicy": "http://codes.wmo.int/wmdr/DataPolicy/",
+    "levelOfData": "http://codes.wmo.int/wmdr/LevelOfData/",
+    "surfaceRoughness": "http://codes.wmo.int/wmdr/SurfaceRoughnessDavenport/",
+    "climateZone": "http://codes.wmo.int/wmdr/ClimateZone/",
+    "surfaceCoverScheme": "http://codes.wmo.int/wmdr/SurfaceCoverClassification/",
+    "localTopography": "http://codes.wmo.int/wmdr/LocalTopography/",
+    "relativeElevation": "http://codes.wmo.int/wmdr/RelativeElevation/",
+    "topographicContext": "http://codes.wmo.int/wmdr/TopographicContext/",
+    "altitudeOrDepth": "http://codes.wmo.int/wmdr/AltitudeOrDepth/",
+}
+
+SURFACE_COVER_SCHEME_TO_REGISTER = {
+    "globCover2009": "SurfaceCoverGlobCover2009",
+    "igbp": "SurfaceCoverIGBP",
+    "lccs": "SurfaceCoverLCCS",
+    "pft": "SurfaceCoverPFT",
+    "umd": "SurfaceCoverUMD",
+    "laiFpar": "SurfaceCoverLAIFPAR",
+    "npp": "SurfaceCoverNPP",
+}
+
 
 @dataclass(frozen=True)
 class ValidationMessage:
@@ -52,13 +91,7 @@ def validate_record(record: dict[str, Any]) -> ValidationReport:
 
 
 def normalize_record(record: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy with safe UI defaults and current WMDR2 v0.3.x names.
-
-    The normalizer is deliberately conservative. It migrates obsolete names and
-    copies existing deployment context into current observing configurations when
-    a legacy PoC record provides that context. It avoids inventing substantive
-    metadata. Dated structures are represented as ``time.interval``.
-    """
+    """Return a copy normalized to the current WMDR2 v0.4.0 record shape."""
     normalized = deepcopy(record)
     normalized.setdefault("type", "Feature")
     normalized["id"] = _normalize_facility_id(normalized.get("id"))
@@ -71,11 +104,12 @@ def normalize_record(record: dict[str, Any]) -> dict[str, Any]:
         normalized["conformsTo"] = [WMDR2_CORE_CONFORMANCE]
 
     normalized.setdefault("time", {"interval": ["..", ".."], "resolution": "P1D"})
-    normalized.setdefault("geometry", {"type": "Point", "coordinates": [0.0, 0.0]})
+    normalized.setdefault("geometry", None)
 
     props = normalized.setdefault("properties", {})
     props.setdefault("type", "facility")
     props.setdefault("title", normalized.get("id", "Untitled facility"))
+    props.setdefault("facilityType", None)
 
     legacy_deployments = props.get("deployments") if isinstance(props.get("deployments"), list) else []
     deployment_by_uid = {
@@ -84,22 +118,30 @@ def normalize_record(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(dep, dict) and (dep.get("uid") or dep.get("id"))
     }
 
-    _migrate_facility_properties(props)
+    _migrate_facility_properties(props, normalized)
     props.setdefault("contacts", [])
-    props.setdefault("observationSeries", [])
+    props.setdefault("observations", [])
     props.setdefault("instruments", [])
     props.setdefault("schedules", [])
 
-    props["observationSeries"] = [
-        _normalize_observation_series(item, deployment_by_uid)
-        for item in _as_list(props.get("observationSeries"))
-    ]
+    props["facilityType"] = _concept_or_null(props.get("facilityType"), "facilityType")
+    if props.get("wmoRegion") not in (None, ""):
+        props["wmoRegion"] = _concept(props.get("wmoRegion"), "wmoRegion")
+
     props["contacts"] = [_normalize_contact(item) for item in _as_list(props.get("contacts"))]
     props["instruments"] = [_normalize_instrument(item) for item in _as_list(props.get("instruments"))]
+    props["observations"] = [
+        _normalize_observation(item, deployment_by_uid, index)
+        for index, item in enumerate(_as_list(props.get("observations")))
+    ]
 
-    # v0.3.x has no facility-level deployments or reporting registry.
     props.pop("deployments", None)
     props.pop("reporting", None)
+    props.pop("observationSeries", None)
+    props.pop("programAffiliation", None)
+    props.pop("programAffiliations", None)
+    props.pop("territory", None)
+    props.pop("links", None)
     return normalized
 
 
@@ -124,36 +166,38 @@ def _normalize_instrument_identifier(value: Any) -> Any:
     return text if text.startswith(INSTRUMENT_PREFIX) else f"{INSTRUMENT_PREFIX}{text}"
 
 
-def _migrate_facility_properties(props: dict[str, Any]) -> None:
-    if "observationSeries" not in props and isinstance(props.get("observations"), list):
-        props["observationSeries"] = props.pop("observations")
-    else:
-        props.pop("observations", None)
+def _migrate_facility_properties(props: dict[str, Any], record: dict[str, Any]) -> None:
+    if "observations" not in props and isinstance(props.get("observationSeries"), list):
+        props["observations"] = props.get("observationSeries")
+    elif "observations" not in props and isinstance(props.get("observations"), list):
+        pass
 
-    if "programAffiliations" not in props:
-        if isinstance(props.get("programAffiliation"), list):
-            props["programAffiliations"] = [_normalize_program_affiliation(item) for item in props["programAffiliation"]]
-        elif isinstance(props.get("temporalProgramAffiliation"), list):
-            props["programAffiliations"] = [_normalize_program_affiliation(item) for item in props["temporalProgramAffiliation"]]
-    else:
-        props["programAffiliations"] = [_normalize_program_affiliation(item) for item in _as_list(props.get("programAffiliations"))]
-    props.pop("programAffiliation", None)
-    props.pop("temporalProgramAffiliation", None)
+    if "territories" not in props and isinstance(props.get("territory"), list):
+        props["territories"] = props.get("territory")
+    if isinstance(props.get("territories"), list):
+        props["territories"] = [_normalize_territory(item) for item in props["territories"]]
 
     if isinstance(props.get("environment"), dict):
         props["environment"] = [props["environment"]]
     if isinstance(props.get("environment"), list):
-        props["environment"] = [_date_to_time_interval(item) for item in props["environment"]]
-    if isinstance(props.get("territory"), list):
-        props["territory"] = [_date_to_time_interval(item) for item in props["territory"]]
+        props["environment"] = [_normalize_environment(item) for item in props["environment"]]
+
+    if "links" in props and "links" not in record:
+        record["links"] = props["links"]
 
 
-def _normalize_program_affiliation(value: Any) -> Any:
+def _normalize_territory(value: Any) -> Any:
     if not isinstance(value, dict):
         return value
-    item = _date_to_time_interval(value)
-    if "program" not in item and "programAffiliation" in item:
-        item["program"] = item.pop("programAffiliation")
+    item = dict(value)
+    if "dates" not in item and isinstance(item.get("time"), dict):
+        interval = item["time"].get("interval")
+        if isinstance(interval, list) and interval:
+            item["dates"] = [str(part or "..") for part in interval[:2]]
+    if item.get("territory") not in (None, ""):
+        item["territory"] = _concept_or_null(item.get("territory"), "territory")
+    item.pop("time", None)
+    item.pop("date", None)
     return item
 
 
@@ -177,25 +221,29 @@ def _date_to_time_interval(value: Any) -> Any:
     return item
 
 
-def _normalize_observation_series(value: Any, deployment_by_uid: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    obs = dict(value) if isinstance(value, dict) else {"id": "observationSeries:unknown"}
+def _dates_from_time_or_default(value: dict[str, Any]) -> list[str] | None:
+    if isinstance(value.get("dates"), list) and value["dates"]:
+        return [str(part or "..") for part in value["dates"][:2]]
+    time = value.get("time") if isinstance(value.get("time"), dict) else None
+    interval = time.get("interval") if time else None
+    if isinstance(interval, list) and interval:
+        return [str(part or "..") for part in interval[:2]]
+    return None
+
+
+def _normalize_observation(value: Any, deployment_by_uid: dict[str, dict[str, Any]], index: int) -> dict[str, Any]:
+    obs = dict(value) if isinstance(value, dict) else {"id": f"observation:{index + 1}"}
 
     if "id" not in obs and isinstance(obs.get("uid"), str):
-        # Keep uid-only legacy records valid; new examples commonly use id.
-        pass
+        obs["id"] = obs.pop("uid")
     elif "id" in obs and isinstance(obs["id"], str):
-        obs["id"] = obs["id"].replace("observation:", "observationSeries:", 1)
-    elif "uid" not in obs:
-        obs["id"] = "observationSeries:unknown"
+        obs["id"] = obs["id"].replace("observationSeries:", "observation:", 1)
+    elif "id" not in obs:
+        obs["id"] = f"observation:{index + 1}"
 
-    # Current v0.3.x uses observedFeature. Older examples used observedDomain;
-    # normalize that alias away so the UI/export follows the current schema.
     if "observedFeature" not in obs and isinstance(obs.get("observedDomain"), dict):
         obs["observedFeature"] = dict(obs["observedDomain"])
     obs.pop("observedDomain", None)
-
-    if "programAffiliations" not in obs and isinstance(obs.get("programAffiliation"), list):
-        obs["programAffiliations"] = obs.pop("programAffiliation")
 
     if "applicationAreas" not in obs:
         if isinstance(obs.get("applicationArea"), list):
@@ -213,21 +261,66 @@ def _normalize_observation_series(value: Any, deployment_by_uid: dict[str, dict[
     if "reportingProcedures" not in obs and isinstance(obs.get("reporting"), list):
         obs["reportingProcedures"] = obs.pop("reporting")
 
-    if "observingConfigurations" not in obs and isinstance(obs.get("deployments"), list):
-        obs["observingConfigurations"] = [
-            {"deployment": ref} for ref in obs["deployments"] if isinstance(ref, str) and ref
-        ]
+    if "configurations" not in obs and isinstance(obs.get("observingConfigurations"), list):
+        obs["configurations"] = obs.get("observingConfigurations")
+    if "configurations" not in obs and isinstance(obs.get("deployments"), list):
+        obs["configurations"] = [{"deployment": ref} for ref in obs["deployments"] if isinstance(ref, str) and ref]
+    obs.pop("observingConfigurations", None)
     obs.pop("deployments", None)
 
-    if "observingConfigurations" in obs:
-        obs["observingConfigurations"] = [
-            _normalize_observing_configuration(item, deployment_by_uid)
-            for item in _as_list(obs.get("observingConfigurations"))
-        ]
+    if obs.get("observedProperty") not in (None, ""):
+        obs["observedProperty"] = _concept(obs.get("observedProperty"), "observedProperty")
+    if obs.get("observedGeometry") not in (None, ""):
+        obs["observedGeometry"] = _concept(obs.get("observedGeometry"), "observedGeometry")
+
+    feature = obs.get("observedFeature") if isinstance(obs.get("observedFeature"), dict) else {}
+    if feature.get("domain") not in (None, ""):
+        feature["domain"] = _concept_or_null(feature.get("domain"), "domain")
+    if feature.get("domainFeature") not in (None, ""):
+        feature["domainFeature"] = _concept(feature.get("domainFeature"))
+    obs["observedFeature"] = feature
+
+    obs["programAffiliations"] = _normalize_program_affiliations(obs.get("programAffiliations") or obs.get("programAffiliation"))
+    obs.pop("programAffiliation", None)
+    if obs.get("applicationAreas") not in (None, ""):
+        obs["applicationAreas"] = [_concept(item, "applicationAreas") for item in _as_list(obs.get("applicationAreas")) if item not in (None, "")]
+
+    obs["configurations"] = [
+        _normalize_configuration(item, deployment_by_uid, obs["id"], config_index)
+        for config_index, item in enumerate(_as_list(obs.get("configurations")))
+    ]
+    if obs.get("observingProcedures"):
+        obs["observingProcedures"] = [_normalize_observing_procedure(item) for item in _as_list(obs.get("observingProcedures"))]
+    if obs.get("reportingProcedures"):
+        obs["reportingProcedures"] = [_normalize_reporting_procedure(item) for item in _as_list(obs.get("reportingProcedures"))]
     return obs
 
 
-def _normalize_observing_configuration(value: Any, deployment_by_uid: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _normalize_program_affiliations(value: Any) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in _as_list(value):
+        if item in (None, ""):
+            continue
+        if not isinstance(item, dict):
+            result.append({"programAffiliation": _concept(item, "programAffiliation")})
+            continue
+        row = dict(item)
+        if "programAffiliation" not in row and "program" in row:
+            row["programAffiliation"] = row.pop("program")
+        if "programAffiliation" in row:
+            row["programAffiliation"] = _concept(row["programAffiliation"], "programAffiliation")
+        if row.get("reportingStatus") not in (None, ""):
+            row["reportingStatus"] = _concept_or_null(row.get("reportingStatus"), "reportingStatus")
+        dates = _dates_from_time_or_default(row)
+        if dates:
+            row["dates"] = dates
+        row.pop("time", None)
+        row.pop("date", None)
+        result.append(row)
+    return result
+
+
+def _normalize_configuration(value: Any, deployment_by_uid: dict[str, dict[str, Any]], observation_id: str, index: int) -> dict[str, Any]:
     config = _date_to_time_interval(value) if isinstance(value, dict) else {}
 
     deployment_ref = config.pop("deployment", None)
@@ -238,47 +331,140 @@ def _normalize_observing_configuration(value: Any, deployment_by_uid: dict[str, 
             config["instrument"] = inst[0] if isinstance(inst, list) and inst else inst
         if "sourceOfObservation" not in config and "sourceOfObservation" in deployment:
             config["sourceOfObservation"] = deployment["sourceOfObservation"]
-        for source_key, target_key in (
-            ("geometry", "geometry"),
-            ("referenceSurface", "referenceSurface"),
-            ("localReferenceSurface", "referenceSurface"),
-            ("relativeLocation", "relativeLocation"),
-            ("verticalDistanceFromReferenceSurface", "verticalDistanceFromReferenceSurface"),
-        ):
-            if target_key not in config and source_key in deployment:
-                config[target_key] = deployment[source_key]
+        for source_key in ("geometry", "relativeLocation", "referenceSurface", "verticalDistanceFromReferenceSurface"):
+            if source_key not in config and source_key in deployment:
+                config[source_key] = deployment[source_key]
 
-    # Flatten the v0.5/v0.6 PoC's obsolete observingLocation wrapper.
     location = config.pop("observingLocation", None)
     if isinstance(location, dict):
         for key in ("geometry", "referenceSurface", "relativeLocation", "verticalDistanceFromReferenceSurface"):
             if key not in config and key in location:
                 config[key] = location[key]
 
+    if not config.get("id"):
+        config["id"] = f"{observation_id}-configuration-{index + 1}"
+    if "time" not in config or not isinstance(config.get("time"), dict):
+        config["time"] = {"interval": ["..", ".."]}
+
     if "instrument" in config:
         config["instrument"] = _normalize_instrument_identifier(config.get("instrument"))
 
-    _cleanup_observing_configuration(config)
-    if config.get("time") == {}:
-        config.pop("time", None)
+    if "serialNumber" in config and "instrumentSerialNumber" not in config:
+        config["instrumentSerialNumber"] = config.pop("serialNumber")
+    else:
+        config.pop("serialNumber", None)
+
+    _normalize_configuration_concepts(config)
+    _normalize_vertical_distance(config)
+    _cleanup_configuration(config)
     return config
 
 
-def _cleanup_observing_configuration(config: dict[str, Any]) -> None:
-    """Remove optional nested UI shells that would be schema-invalid when empty.
+def _normalize_configuration_concepts(config: dict[str, Any]) -> None:
+    for key, register in (
+        ("observingMethod", "observingMethod"),
+        ("operatingStatus", "operatingStatus"),
+        ("sourceOfObservation", "sourceOfObservation"),
+        ("exposure", "exposure"),
+    ):
+        if config.get(key) not in (None, ""):
+            config[key] = _concept_or_null(config.get(key), register)
 
-    The browser form has separate fields for quantity.value and quantity.uom.
-    Synchronizing an untouched form must not create
-    ``verticalDistanceFromReferenceSurface: {}`` or ``{uom: "m"}``, because the
-    WMDR2 quantity schema requires ``value`` when the quantity object is present.
-    """
-    quantity = config.get("verticalDistanceFromReferenceSurface")
-    if isinstance(quantity, dict):
-        value = quantity.get("value")
-        if value in (None, ""):
-            config.pop("verticalDistanceFromReferenceSurface", None)
-        elif quantity.get("uom") in (None, ""):
-            quantity.pop("uom", None)
+
+def _normalize_vertical_distance(config: dict[str, Any]) -> None:
+    vd = config.get("verticalDistance") if isinstance(config.get("verticalDistance"), dict) else None
+    legacy = config.pop("verticalDistanceFromReferenceSurface", None)
+    legacy_ref = config.pop("referenceSurface", None)
+    if vd is None and isinstance(legacy, dict):
+        value = legacy.get("value")
+        if value not in (None, ""):
+            vd = {"distances": [value], "unit": legacy.get("uom"), "referenceSurface": legacy_ref}
+    elif vd is None and legacy_ref not in (None, ""):
+        vd = {"distances": [], "unit": None, "referenceSurface": legacy_ref}
+    if not isinstance(vd, dict):
+        return
+    distances = vd.get("distances")
+    if not isinstance(distances, list):
+        distances = [vd.get("value")] if vd.get("value") not in (None, "") else []
+    distances = [item for item in distances if item not in (None, "")]
+    if not distances:
+        config.pop("verticalDistance", None)
+        return
+    vd["distances"] = distances
+    vd["unit"] = _concept_or_null(vd.get("unit"), "unit")
+    vd["referenceSurface"] = _concept_or_null(vd.get("referenceSurface"), "referenceSurface")
+    config["verticalDistance"] = vd
+
+
+def _cleanup_configuration(config: dict[str, Any]) -> None:
+    if config.get("time") == {}:
+        config.pop("time", None)
+
+
+def _normalize_observing_procedure(value: Any) -> Any:
+    proc = _date_to_time_interval(value) if isinstance(value, dict) else {}
+    if proc.get("strategy") not in (None, ""):
+        proc["strategy"] = _concept(proc.get("strategy"))
+    return proc
+
+
+def _normalize_reporting_procedure(value: Any) -> Any:
+    proc = dict(value) if isinstance(value, dict) else {}
+    for key, register in (
+        ("dataPolicy", "dataPolicy"),
+        ("levelOfData", "levelOfData"),
+        ("uom", "unit"),
+        ("strategy", None),
+        ("timeStampMeaning", None),
+    ):
+        if proc.get(key) not in (None, ""):
+            proc[key] = _concept_or_null(proc.get(key), register)
+    if proc.get("dataFormat"):
+        proc["dataFormat"] = [_concept(item, "dataFormat") for item in _as_list(proc.get("dataFormat"))]
+    if proc.get("referenceTimeSource"):
+        proc["referenceTimeSource"] = [_concept(item) for item in _as_list(proc.get("referenceTimeSource"))]
+    if "spatialReportingInterval" in proc and "temporalReportingInterval" not in proc:
+        proc["temporalReportingInterval"] = proc.pop("spatialReportingInterval")
+    proc.pop("time", None)
+    proc.pop("date", None)
+    return proc
+
+
+def _normalize_environment(value: Any) -> Any:
+    item = _date_to_time_interval(value)
+    if not isinstance(item, dict):
+        return item
+    for key, register in (("climateZone", "climateZone"), ("surfaceRoughness", "surfaceRoughness")):
+        if item.get(key) not in (None, ""):
+            item[key] = _concept(item[key], register)
+    item["surfaceCover"] = _normalize_surface_cover(item.get("surfaceCover")) if item.get("surfaceCover") not in (None, "") else item.get("surfaceCover")
+    if not item.get("surfaceCover"):
+        item.pop("surfaceCover", None)
+    topo = item.get("topographyBathymetry")
+    if isinstance(topo, dict):
+        normalized: dict[str, Any] = {}
+        for key in ("localTopography", "relativeElevation", "topographicContext", "altitudeOrDepth"):
+            if topo.get(key) not in (None, ""):
+                normalized[key] = _concept(topo[key], key)
+        if normalized:
+            item["topographyBathymetry"] = normalized
+        else:
+            item.pop("topographyBathymetry", None)
+    return item
+
+
+def _normalize_surface_cover(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    scheme_raw = value.get("scheme") or value.get("classificationScheme")
+    cover_raw = value.get("value")
+    if cover_raw in (None, "") or scheme_raw in (None, ""):
+        return None
+    scheme = _concept(scheme_raw, "surfaceCoverScheme")
+    scheme_id = scheme.get("id", "")
+    register = SURFACE_COVER_SCHEME_TO_REGISTER.get(scheme_id)
+    cover_base = f"http://codes.wmo.int/wmdr/{register}/" if register else None
+    return {"scheme": scheme, "value": _concept(cover_raw, base_url=cover_base)}
 
 
 def _normalize_contact(value: Any) -> dict[str, Any]:
@@ -293,14 +479,50 @@ def _normalize_contact(value: Any) -> dict[str, Any]:
 def _normalize_instrument(value: Any) -> dict[str, Any]:
     inst = dict(value) if isinstance(value, dict) else {"id": "instrument:unknown"}
     if "id" not in inst and isinstance(inst.get("uid"), str):
-        inst["uid"] = _normalize_instrument_identifier(inst.get("uid"))
-    elif "id" not in inst and "uid" not in inst:
+        inst["id"] = _normalize_instrument_identifier(inst.pop("uid"))
+    elif "id" not in inst:
         inst["id"] = "instrument:unknown"
-    if "id" in inst:
-        inst["id"] = _normalize_instrument_identifier(inst.get("id"))
+    inst["id"] = _normalize_instrument_identifier(inst.get("id"))
+    if inst.get("observingMethods"):
+        inst["observingMethods"] = [_concept(item, "observingMethods") for item in _as_list(inst.get("observingMethods"))]
     inst.pop("serialNumber", None)
     inst.pop("serialNumbers", None)
+    inst.pop("instrumentSerialNumber", None)
+    inst.pop("uid", None)
     return inst
+
+
+def _concept_or_null(value: Any, register: str | None = None) -> dict[str, Any] | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, dict) and value.get("nilReason"):
+        return None
+    return _concept(value, register)
+
+
+def _concept(value: Any, register: str | None = None, *, base_url: str | None = None) -> dict[str, Any]:
+    if isinstance(value, dict):
+        if "id" in value:
+            concept = dict(value)
+            concept["id"] = str(concept["id"])
+            if "uri" in concept and "url" not in concept:
+                concept["url"] = concept.pop("uri")
+            return concept
+        if "value" in value and len(value) <= 3:
+            value = value.get("value")
+        elif "url" in value:
+            text = str(value["url"])
+            return {"id": text.rstrip("/").split("/")[-1], "url": text}
+        else:
+            return {"id": str(value)}
+    text = str(value).strip()
+    if text.startswith("http://") or text.startswith("https://"):
+        return {"id": text.rstrip("/").split("/")[-1], "url": text}
+    url_base = base_url or (VOCAB_URL_BASES.get(register or "") if register else None)
+    result = {"id": text}
+    if url_base and text:
+        result["url"] = f"{url_base}{text}"
+    return result
 
 
 def _ref_id(value: dict[str, Any]) -> str | None:
@@ -312,7 +534,7 @@ def _semantic_warnings(record: dict[str, Any]) -> list[ValidationMessage]:
     warnings: list[ValidationMessage] = []
     props = record.get("properties", {}) if isinstance(record.get("properties"), dict) else {}
     instruments = props.get("instruments", []) if isinstance(props.get("instruments"), list) else []
-    series = props.get("observationSeries", []) if isinstance(props.get("observationSeries"), list) else []
+    observations = props.get("observations", []) if isinstance(props.get("observations"), list) else []
 
     tg = record.get("temporalGeometry") if isinstance(record.get("temporalGeometry"), dict) else None
     if tg:
@@ -320,37 +542,22 @@ def _semantic_warnings(record: dict[str, Any]) -> list[ValidationMessage]:
         dates = tg.get("dates") if isinstance(tg.get("dates"), list) else []
         methods = tg.get("methods") if isinstance(tg.get("methods"), list) else []
         if len(coordinates) != len(dates):
-            warnings.append(
-                ValidationMessage(
-                    path="$.temporalGeometry",
-                    message="temporalGeometry coordinates and dates should have the same number of entries.",
-                )
-            )
+            warnings.append(ValidationMessage(path="$.temporalGeometry", message="temporalGeometry coordinates and dates should have the same number of entries."))
         if methods and len(methods) != len(coordinates):
-            warnings.append(
-                ValidationMessage(
-                    path="$.temporalGeometry.methods",
-                    message="temporalGeometry methods should be parallel to coordinates when present.",
-                )
-            )
+            warnings.append(ValidationMessage(path="$.temporalGeometry.methods", message="temporalGeometry methods should be parallel to coordinates when present."))
         geometry_coordinates = record.get("geometry", {}).get("coordinates") if isinstance(record.get("geometry"), dict) else None
         if coordinates and isinstance(geometry_coordinates, list):
             latest = coordinates[-1]
             if isinstance(latest, list) and _coordinates_differ(geometry_coordinates, latest):
-                warnings.append(
-                    ValidationMessage(
-                        path="$.geometry.coordinates",
-                        message="Current geometry does not match the latest temporalGeometry coordinate.",
-                    )
-                )
+                warnings.append(ValidationMessage(path="$.geometry.coordinates", message="Current geometry does not match the latest temporalGeometry coordinate."))
 
     instrument_ids = {_ref_id(i) for i in instruments if isinstance(i, dict)}
     instrument_ids.discard(None)
 
-    for s_index, obs in enumerate(series):
+    for s_index, obs in enumerate(observations):
         if not isinstance(obs, dict):
             continue
-        configs = obs.get("observingConfigurations", []) or []
+        configs = obs.get("configurations", []) or []
         if not isinstance(configs, list):
             continue
         for c_index, config in enumerate(configs):
@@ -358,20 +565,10 @@ def _semantic_warnings(record: dict[str, Any]) -> list[ValidationMessage]:
                 continue
             interval = config.get("time", {}).get("interval") if isinstance(config.get("time"), dict) else None
             if isinstance(interval, list) and interval and interval[0] == "..":
-                warnings.append(
-                    ValidationMessage(
-                        path=f"$.properties.observationSeries[{s_index}].observingConfigurations[{c_index}].time.interval[0]",
-                        message="The observing configuration start date is explicitly unknown/open ('..'); replace it with the recorded start date when available.",
-                    )
-                )
+                warnings.append(ValidationMessage(path=f"$.properties.observations[{s_index}].configurations[{c_index}].time.interval[0]", message="The configuration start date is explicitly unknown/open ('..'); replace it with the recorded start date when available."))
             instrument_ref = config.get("instrument")
             if instrument_ref and instrument_ref not in instrument_ids:
-                warnings.append(
-                    ValidationMessage(
-                        path=f"$.properties.observationSeries[{s_index}].observingConfigurations[{c_index}].instrument",
-                        message=f"ObservingConfiguration references missing instrument {instrument_ref!r}.",
-                    )
-                )
+                warnings.append(ValidationMessage(path=f"$.properties.observations[{s_index}].configurations[{c_index}].instrument", message=f"Configuration references missing instrument {instrument_ref!r}."))
 
     return warnings
 

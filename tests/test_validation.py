@@ -4,6 +4,13 @@ from node.validation import normalize_record, validate_record
 CORE = "http://wigos.wmo.int/spec/wmdr/2/conf/core"
 
 
+def concept(value: str, register: str | None = None):
+    result = {"id": value}
+    if register:
+        result["url"] = f"http://codes.wmo.int/wmdr/{register}/{value}"
+    return result
+
+
 def minimal_record():
     return {
         "type": "Feature",
@@ -14,35 +21,46 @@ def minimal_record():
         "properties": {
             "type": "facility",
             "title": "Test facility",
-            "observationSeries": [
+            "facilityType": concept("landFixed", "FacilityType"),
+            "observations": [
                 {
-                    "id": "observationSeries:12006",
+                    "id": "12006-point",
                     "title": "domain: atmosphere; geometry: point; variable: 12006",
-                    "observedProperty": 12006,
-                    "observedFeature": {"domain": "atmosphere"},
-                    "observedGeometry": "point",
-                    "programAffiliations": ["GOSGeneral"],
-                    "observingConfigurations": [
+                    "observedProperty": concept("12006", "ObservedVariableAtmosphere"),
+                    "observedFeature": {"domain": concept("atmosphere", "Domain")},
+                    "observedGeometry": concept("point", "Geometry"),
+                    "programAffiliations": [
+                        {"programAffiliation": concept("GOSGeneral", "ProgramAffiliation")}
+                    ],
+                    "configurations": [
                         {
+                            "id": "12006-point-configuration-1",
                             "time": {"interval": ["2024-01-01", ".."]},
-                            "referenceSurface": "localGround",
-                            "verticalDistanceFromReferenceSurface": {"value": 2.0, "uom": "m"},
-                            "observingMethod": 266,
-                            "sourceOfObservation": "automaticReading",
+                            "verticalDistance": {
+                                "distances": [2.0],
+                                "unit": concept("m", "unit"),
+                                "referenceSurface": concept("localGround", "ReferenceSurfaceType"),
+                            },
+                            "observingMethod": concept("266", "ObservingMethodAtmosphere"),
+                            "sourceOfObservation": concept("automaticReading", "SourceOfObservation"),
                             "instrument": "instrument:test",
                         }
                     ],
                     "reportingProcedures": [
-                        {"internationalExchange": True, "uom": "K", "strategy": "routine"}
+                        {
+                            "internationalExchange": True,
+                            "dataPolicy": concept("noLimitation", "DataPolicy"),
+                            "uom": concept("K", "unit"),
+                            "temporalReportingInterval": "PT1H",
+                        }
                     ],
                 }
             ],
             "instruments": [
-                {"id": "instrument:test", "manufacturer": "Example", "model": "A", "observingMethods": [266]}
+                {"id": "instrument:test", "manufacturer": "Example", "model": "A", "observingMethods": [concept("266", "ObservingMethodAtmosphere")]}
             ],
-            "contactAssignments": [{"contact": "contact:owner", "roles": ["owner"]}],
             "contacts": [
-                {"identifier": "contact:owner", "organization": "Example", "emails": [{"value": "x@example.invalid"}]}
+                {"identifier": "contact:owner", "organization": "Example", "emails": [{"value": "x@example.invalid"}], "roles": ["owner"]}
             ],
             "schedules": [],
         },
@@ -62,14 +80,21 @@ def test_bare_wsi_id_is_valid():
     assert report.valid, report.as_dict()
 
 
-def test_observation_series_may_have_no_or_empty_observing_configurations():
+def test_observations_require_non_empty_configurations_in_v04():
     record = minimal_record()
-    record["properties"]["observationSeries"] = [
-        {"id": "observationSeries:314", "observedProperty": 314, "observedDomain": {"domain": "atmosphere"}},
-        {"id": "observationSeries:325", "observedProperty": 325, "observedDomain": {"domain": "atmosphere"}, "observingConfigurations": []},
+    record["properties"]["observations"] = [
+        {
+            "id": "314-totalcolumn",
+            "observedProperty": concept("314"),
+            "observedGeometry": concept("totalColumn"),
+            "observedFeature": {"domain": concept("atmosphere")},
+            "programAffiliations": [{"programAffiliation": concept("AERONET")}],
+            "configurations": [],
+        }
     ]
-    report = validate_record(normalize_record(record))
-    assert report.valid, report.as_dict()
+    report = validate_record(record)
+    assert not report.valid
+    assert any("should be non-empty" in error.message for error in report.errors)
 
 
 def test_legacy_deployments_property_is_rejected_without_normalization():
@@ -82,23 +107,26 @@ def test_legacy_deployments_property_is_rejected_without_normalization():
 
 def test_open_start_in_time_interval_is_valid_with_warning():
     record = minimal_record()
-    record["properties"]["observationSeries"][0]["observingConfigurations"][0]["time"]["interval"][0] = ".."
+    record["properties"]["observations"][0]["configurations"][0]["time"]["interval"][0] = ".."
     report = validate_record(record)
     assert report.valid, report.as_dict()
     assert any("explicitly unknown/open" in warning.message for warning in report.warnings)
 
 
-def test_normalize_converts_valid_from_and_time_interval_to_current_time_interval():
+def test_normalize_converts_legacy_v03_names_to_v04_names():
     record = normalize_record({
         "id": "wsi:0-20000-0-X",
         "geometry": {"type": "Point", "coordinates": [7, 46]},
         "properties": {
             "title": "X",
+            "facilityType": "landFixed",
             "observationSeries": [
                 {
                     "id": "observationSeries:12006",
                     "observedProperty": 12006,
                     "observedFeature": {"domain": "atmosphere"},
+                    "observedGeometry": "point",
+                    "programAffiliations": ["GOSGeneral"],
                     "observingConfigurations": [
                         {"validFrom": "", "observingMethod": {"nilReason": "unknown"}},
                         {"time": {"interval": ["2024-01-01", ".."]}, "observingMethod": 266},
@@ -107,43 +135,53 @@ def test_normalize_converts_valid_from_and_time_interval_to_current_time_interva
             ],
         },
     })
-    configs = record["properties"]["observationSeries"][0]["observingConfigurations"]
+    obs = record["properties"]["observations"][0]
+    configs = obs["configurations"]
     assert record["id"] == "0-20000-0-X"
+    assert "observationSeries" not in record["properties"]
+    assert obs["id"] == "observation:12006"
     assert configs[0]["time"]["interval"] == ["..", ".."]
+    assert configs[0]["id"] == "observation:12006-configuration-1"
     assert configs[1]["time"]["interval"] == ["2024-01-01", ".."]
-    assert "validFrom" not in configs[0]
     assert validate_record(record).valid, validate_record(record).as_dict()
 
 
-def test_normalize_flattens_obsolete_observing_location():
+def test_normalize_flattens_obsolete_observing_location_and_vertical_distance():
     record = normalize_record({
         "id": "0-20000-0-X",
         "geometry": {"type": "Point", "coordinates": [7, 46]},
         "properties": {
             "title": "X",
+            "facilityType": "landFixed",
             "observationSeries": [
                 {
                     "id": "observationSeries:12006",
+                    "observedProperty": 12006,
+                    "observedGeometry": "point",
+                    "observedFeature": {"domain": "atmosphere"},
+                    "programAffiliations": ["GOSGeneral"],
                     "observingConfigurations": [
                         {
                             "time": {"interval": ["2024-01-01", ".."]},
                             "observingMethod": 266,
-                            "observingLocation": {"referenceSurface": "localGround"},
+                            "observingLocation": {"referenceSurface": "localGround", "verticalDistanceFromReferenceSurface": {"value": 2, "uom": "m"}},
                         }
                     ],
                 }
             ],
         },
     })
-    config = record["properties"]["observationSeries"][0]["observingConfigurations"][0]
-    assert config["referenceSurface"] == "localGround"
+    config = record["properties"]["observations"][0]["configurations"][0]
+    assert config["verticalDistance"]["referenceSurface"]["id"] == "localGround"
+    assert config["verticalDistance"]["distances"] == [2]
     assert "observingLocation" not in config
+    assert "referenceSurface" not in config
     assert validate_record(record).valid, validate_record(record).as_dict()
 
 
 def test_missing_instrument_is_warning_not_schema_error():
     record = minimal_record()
-    record["properties"]["observationSeries"][0]["observingConfigurations"][0]["instrument"] = "instrument:missing"
+    record["properties"]["observations"][0]["configurations"][0]["instrument"] = "instrument:missing"
     report = validate_record(record)
     assert report.valid
     assert report.warnings
@@ -156,7 +194,8 @@ def test_normalize_adds_poc_shell_defaults_and_current_names():
     assert record["id"] == "0-20000-0-X"
     assert record["conformsTo"] == [CORE]
     assert record["time"] == {"interval": ["..", ".."], "resolution": "P1D"}
-    assert record["properties"]["observationSeries"] == []
+    assert record["properties"]["observations"] == []
+    assert "observationSeries" not in record["properties"]
 
 
 def test_normalize_migrates_old_poc_observation_names_and_deployment_context():
@@ -166,13 +205,13 @@ def test_normalize_migrates_old_poc_observation_names_and_deployment_context():
             "geometry": {"type": "Point", "coordinates": [7, 46]},
             "properties": {
                 "title": "X",
-                "programAffiliation": [
-                    {"date": "2024-01-01", "programAffiliation": "GOSGeneral"}
-                ],
+                "facilityType": "landFixed",
+                "territory": [{"time": {"interval": ["2024-01-01", ".."]}, "territory": "CHE"}],
                 "observations": [
                     {
                         "id": "observation:12006",
                         "observedVariable": 12006,
+                        "observedGeometry": "point",
                         "observedDomain": {"domain": "atmosphere"},
                         "programAffiliation": ["GOSGeneral"],
                         "deployments": ["deployment:x"],
@@ -191,18 +230,18 @@ def test_normalize_migrates_old_poc_observation_names_and_deployment_context():
             },
         }
     )
-    obs = record["properties"]["observationSeries"][0]
-    config = obs["observingConfigurations"][0]
+    obs = record["properties"]["observations"][0]
+    config = obs["configurations"][0]
     assert "deployments" not in record["properties"]
-    assert obs["id"] == "observationSeries:12006"
-    assert obs["observedProperty"] == 12006
-    assert obs["observedFeature"] == {"domain": "atmosphere"}
-    assert obs["programAffiliations"] == ["GOSGeneral"]
+    assert obs["id"] == "observation:12006"
+    assert obs["observedProperty"]["id"] == "12006"
+    assert obs["observedFeature"]["domain"]["id"] == "atmosphere"
+    assert obs["programAffiliations"][0]["programAffiliation"]["id"] == "GOSGeneral"
     assert config["instrument"] == "instrument:x"
-    assert config["sourceOfObservation"] == "automaticReading"
-    assert config["referenceSurface"] == "localGround"
-    assert record["properties"]["programAffiliations"][0]["program"] == "GOSGeneral"
-    assert record["properties"]["programAffiliations"][0]["time"]["interval"] == ["2024-01-01", ".."]
+    assert config["sourceOfObservation"]["id"] == "automaticReading"
+    assert config["verticalDistance"]["referenceSurface"]["id"] == "localGround"
+    assert record["properties"]["territories"][0]["territory"]["id"] == "CHE"
+    assert record["properties"]["territories"][0]["dates"] == ["2024-01-01", ".."]
 
 
 def test_facility_temporal_geometry_history_is_valid():
@@ -211,12 +250,9 @@ def test_facility_temporal_geometry_history_is_valid():
     record["geometry"] = {"type": "Point", "coordinates": [-112.106, -79.466, 1801]}
     record["temporalGeometry"] = {
         "type": "MovingPoint",
-        "coordinates": [
-            [-112.086, -79.468, 1833],
-            [-112.106, -79.466, 1801],
-        ],
+        "coordinates": [[-112.086, -79.468, 1833], [-112.106, -79.466, 1801]],
         "dates": ["2006-01-13", "2009-01-26"],
-        "methods": [["gps"], ["gps"]],
+        "methods": [[], [{"id": "gps", "url": "http://codes.wmo.int/wmdr/GeopositioningMethod/gps"}]],
     }
     report = validate_record(record)
     assert report.valid, report.as_dict()
@@ -226,16 +262,12 @@ def test_facility_temporal_geometry_history_is_valid():
 def test_temporal_geometry_parallel_array_mismatch_is_warning_only():
     record = minimal_record()
     record["geometry"] = {"type": "Point", "coordinates": [8, 47]}
-    record["temporalGeometry"] = {
-        "type": "MovingPoint",
-        "coordinates": [[7, 46], [8, 47]],
-        "dates": ["2024-01-01"],
-        "methods": [["gps"]],
-    }
+    record["temporalGeometry"] = {"type": "MovingPoint", "coordinates": [[7, 46], [8, 47]], "dates": ["2024-01-01"], "methods": [[]]}
     report = validate_record(record)
     assert report.valid, report.as_dict()
     assert any("coordinates and dates" in warning.message for warning in report.warnings)
     assert any("methods should be parallel" in warning.message for warning in report.warnings)
+
 
 def test_normalize_migrates_application_area_to_application_areas():
     record = normalize_record({
@@ -243,6 +275,7 @@ def test_normalize_migrates_application_area_to_application_areas():
         "geometry": {"type": "Point", "coordinates": [7, 46]},
         "properties": {
             "title": "X",
+            "facilityType": "landFixed",
             "observationSeries": [
                 {
                     "id": "observationSeries:216",
@@ -250,15 +283,16 @@ def test_normalize_migrates_application_area_to_application_areas():
                     "observedProperty": 216,
                     "observedGeometry": "point",
                     "observedDomain": {"domain": "atmosphere", "domainFeature": "air", "featureName": "near surface"},
+                    "programAffiliations": ["GOSGeneral"],
                     "applicationArea": ["weatherForecasting", "climateMonitoring"],
+                    "observingConfigurations": [{"time": {"interval": ["2024-01-01", ".."]}}],
                 }
             ],
         },
     })
-    obs = record["properties"]["observationSeries"][0]
-    assert obs["observedFeature"] == {"domain": "atmosphere", "domainFeature": "air", "featureName": "near surface"}
-    assert "observedDomain" not in obs
-    assert obs["applicationAreas"] == ["weatherForecasting", "climateMonitoring"]
+    obs = record["properties"]["observations"][0]
+    assert obs["observedFeature"]["domain"]["id"] == "atmosphere"
+    assert obs["applicationAreas"][0]["id"] == "weatherForecasting"
     assert "applicationArea" not in obs
     assert validate_record(record).valid, validate_record(record).as_dict()
 
@@ -266,10 +300,10 @@ def test_normalize_migrates_application_area_to_application_areas():
 def test_normalize_prefixes_bare_instrument_ids_and_references():
     record = minimal_record()
     record["properties"]["instruments"] = [{"id": "RS41", "manufacturer": "Vaisala"}]
-    record["properties"]["observationSeries"][0]["observingConfigurations"][0]["instrument"] = "RS41"
+    record["properties"]["observations"][0]["configurations"][0]["instrument"] = "RS41"
     normalized = normalize_record(record)
     inst = normalized["properties"]["instruments"][0]
-    config = normalized["properties"]["observationSeries"][0]["observingConfigurations"][0]
+    config = normalized["properties"]["observations"][0]["configurations"][0]
     assert inst["id"] == "instrument:RS41"
     assert config["instrument"] == "instrument:RS41"
     report = validate_record(normalized)

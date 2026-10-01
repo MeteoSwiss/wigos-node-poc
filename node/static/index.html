@@ -4,17 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>WIGOS Node PoC</title>
-  <link rel="stylesheet" href="static/styles.css?v=0.3.0" />
+  <link rel="stylesheet" href="static/styles.css?v=0.4.0" />
 </head>
 <body>
   <header class="topbar">
     <div>
       <h1>WIGOS Node PoC</h1>
-      <p>Upload, review, edit, validate, and export a WMDR2 v0.3.x full record.</p>
+      <p>Upload, review, edit, validate, and export a WMDR2 v0.4.0 full record.</p>
     </div>
     <div class="topbar-actions">
       <a class="button topbar-link" href="https://github.com/MeteoSwiss/wigos-node-poc/blob/main/README.md" target="_blank" rel="noopener">README</a>
-      <a class="button topbar-link" href="https://github.com/MeteoSwiss/wigos-node-poc/issues" target="_blank" rel="noopener">Feedback</a>
       <div class="status" id="status">No record loaded</div>
     </div>
   </header>
@@ -148,21 +147,21 @@
 
       <details class="card" id="observationsSection">
         <summary>
-          <span>ObservationSeries <span id="observationCount" class="badge">0</span></span>
-          <button class="summary-action" data-open-modal="observationSeriesRaw" type="button">Edit JSON</button>
+          <span>Observations <span id="observationCount" class="badge">0</span></span>
+          <button class="summary-action" data-open-modal="observationsRaw" type="button">Edit JSON</button>
         </summary>
         <div id="observationsList" class="list"></div>
         <div class="actions section-actions">
-          <button id="addObservationBtn">Add ObservationSeries</button>
+          <button id="addObservationBtn">Add Observation</button>
         </div>
       </details>
 
       <details class="card" id="configurationsSection">
         <summary>
-          <span>Observing configurations <span id="configurationCount" class="badge">0</span></span>
+          <span>Configurations <span id="configurationCount" class="badge">0</span></span>
           <button class="summary-action" data-open-modal="configurationsRaw" type="button">Edit JSON</button>
         </summary>
-        <p class="muted">WMDR2 v0.3.x no longer has facility-level deployments. The dated observing context is edited here from ObservationSeries observingConfigurations, including time interval, location context, serial number, and optional instrument references.</p>
+        <p class="muted">WMDR2 v0.4.0 no longer has facility-level deployments. The dated observing context is edited here from Observations configurations, including time interval, location context, serial number, and optional instrument references.</p>
         <div id="configurationsList" class="list"></div>
       </details>
 
@@ -171,7 +170,7 @@
           <span>Procedures and schedules <span id="procedureCount" class="badge">0</span></span>
           <button class="summary-action" data-open-modal="proceduresRaw" type="button">Edit JSON</button>
         </summary>
-        <p class="muted">ObservingProcedures and ReportingProcedures live under each ObservationSeries. They reference reusable schedule objects from <code>properties.schedules</code>.</p>
+        <p class="muted">ObservingProcedures and ReportingProcedures live under each Observations. They reference reusable schedule objects from <code>properties.schedules</code>.</p>
         <div id="proceduresList" class="list"></div>
         <details class="subsection inline-details" id="schedulesEditor" open>
           <summary>Reusable schedules <span id="scheduleCount" class="badge">0</span></summary>
@@ -223,7 +222,7 @@
         <button value="cancel" aria-label="Close">×</button>
       </header>
       <section class="modal-body">
-        <p class="muted">Create a minimal WMDR2 full record. ObservationSeries, instruments, contacts, and geolocation history can then be added in the main form.</p>
+        <p class="muted">Create a minimal WMDR2 full record. Observations, instruments, contacts, and geolocation history can then be added in the main form.</p>
         <div class="new-record-grid">
           <label>Facility id / WSI
             <input id="newRecordIdInput" placeholder="0-20000-0-06725" pattern="(0|1|2|3)-([1-9]\d*)-([0-9]+)-([A-Za-z0-9._-]+)" required />
@@ -326,6 +325,6 @@
   </dialog>
 
   <div id="vocabularyDatalists" class="vocabulary-datalists" aria-hidden="true"></div>
-  <script src="static/app.js?v=0.3.0" type="module"></script>
+  <script src="static/app.js?v=0.4.0" type="module"></script>
 </body>
 </html>

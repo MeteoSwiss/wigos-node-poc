@@ -496,7 +496,7 @@ def _read_url(url: str, *, accept: str) -> tuple[bytes, str]:
         url,
         headers={
             "Accept": accept,
-            "User-Agent": "oscar-nextgen-node-poc/0.3.0 (+https://github.com/MeteoSwiss)",
+            "User-Agent": "wigos-node-poc/0.4.0 (+https://github.com/MeteoSwiss)",
         },
     )
     with urlopen(request, timeout=_REMOTE_TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed public registry URLs

@@ -393,7 +393,8 @@ const exampleRecord = {
     type: 'facility',
     title: 'Blatten',
     description: 'Example facility for WIGOS Node PoC.',
-    wmoRegion: 'europe',
+    facilityType: { id: 'landFixed', url: 'http://codes.wmo.int/wmdr/FacilityType/landFixed' },
+    wmoRegion: { id: 'europe', url: 'http://codes.wmo.int/wmdr/WMORegion/europe' },
     keywords: ['0-20000-0-06725', 'Blatten'],
     contacts: [
       {
@@ -404,27 +405,24 @@ const exampleRecord = {
         emails: ['metadata@example.invalid'],
       },
     ],
-    programAffiliations: [
-      { time: { interval: ['2000-08-17', '..'] }, program: 'GOSGeneral', reportingStatus: 'operational' },
-    ],
-    territory: [{ time: { interval: ['2000-08-17', '..'] }, territory: 'CHE' }],
-    environment: [{ time: { interval: ['2000-08-17', '..'] }, surfaceCover: { classificationScheme: 'igbp', classificationURI: 'http://codes.wmo.int/wmdr/SurfaceCoverClassification/igbp', value: 'grassland' }, surfaceRoughness: 'open', topographyBathymetry: { description: 'Example valley-floor terrain context.' } }],
-    observationSeries: [
+    territories: [{ dates: ['2000-08-17', '..'], territory: { id: 'CHE', url: 'http://codes.wmo.int/wmdr/TerritoryName/CHE' } }],
+    environment: [{ time: { interval: ['2000-08-17', '..'] }, surfaceCover: { scheme: { id: 'igbp', url: 'http://codes.wmo.int/wmdr/SurfaceCoverClassification/igbp' }, value: { id: 'grassland', url: 'http://codes.wmo.int/wmdr/SurfaceCoverIGBP/grassland' } }, surfaceRoughness: { id: 'open', url: 'http://codes.wmo.int/wmdr/SurfaceRoughnessDavenport/open' }, topographyBathymetry: { localTopography: { id: 'flat', url: 'http://codes.wmo.int/wmdr/LocalTopography/flat' } } }],
+    observations: [
       {
-        id: 'observationSeries:12006',
+        id: '12006-point',
         title: 'Horizontal wind speed at specified distance from reference surface',
-        observedProperty: 12006,
-        observedFeature: { domain: 'atmosphere', domainFeature: 'near-surface-air', featureName: '10 m air' },
-        observedGeometry: 'point',
-        programAffiliations: ['GOSGeneral'],
-        applicationAreas: ['weatherForecasting'],
-        observingConfigurations: [
+        observedProperty: { id: '12006', url: 'http://codes.wmo.int/wmdr/ObservedVariableAtmosphere/12006' },
+        observedFeature: { domain: { id: 'atmosphere', url: 'http://codes.wmo.int/wmdr/Domain/atmosphere' }, domainFeature: 'near-surface-air', featureName: '10 m air' },
+        observedGeometry: { id: 'point', url: 'http://codes.wmo.int/wmdr/Geometry/point' },
+        programAffiliations: [{ programAffiliation: { id: 'GOSGeneral', url: 'http://codes.wmo.int/wmdr/ProgramAffiliation/GOSGeneral' } }],
+        applicationAreas: [{ id: 'weatherForecasting', url: 'http://codes.wmo.int/wmdr/ApplicationArea/weatherForecasting' }],
+        configurations: [
           {
+            id: '12006-point-configuration-1',
             time: { interval: ['2020-01-01', '..'] },
-            referenceSurface: 'localGround',
-            verticalDistanceFromReferenceSurface: { value: 10, uom: 'm' },
-            observingMethod: 266,
-            sourceOfObservation: 'automaticReading',
+            verticalDistance: { distances: [10], unit: { id: 'm', url: 'http://codes.wmo.int/wmdr/unit/m' }, referenceSurface: { id: 'localGround', url: 'http://codes.wmo.int/wmdr/ReferenceSurfaceType/localGround' } },
+            observingMethod: { id: '266', url: 'http://codes.wmo.int/wmdr/ObservingMethodAtmosphere/266' },
+            sourceOfObservation: { id: 'automaticReading', url: 'http://codes.wmo.int/wmdr/SourceOfObservation/automaticReading' },
             instrument: 'instrument:wind-sensor-type-a',
           },
         ],
@@ -435,7 +433,7 @@ const exampleRecord = {
         id: 'instrument:wind-sensor-type-a',
         manufacturer: 'Example manufacturer',
         model: 'WindSensor X',
-        observingMethods: [266],
+        observingMethods: [{ id: '266', url: 'http://codes.wmo.int/wmdr/ObservingMethodAtmosphere/266' }],
       },
     ],
     schedules: [],
@@ -444,7 +442,11 @@ const exampleRecord = {
 
 function props() {
   state.record.properties ??= { type: 'facility', title: '' };
-  state.record.properties.observationSeries ??= [];
+  if (!Array.isArray(state.record.properties.observations) && Array.isArray(state.record.properties.observationSeries)) {
+    state.record.properties.observations = state.record.properties.observationSeries;
+    delete state.record.properties.observationSeries;
+  }
+  state.record.properties.observations ??= [];
   state.record.properties.instruments ??= [];
   state.record.properties.contacts ??= [];
   state.record.properties.schedules ??= [];
@@ -558,7 +560,7 @@ function renderAll() {
   $('downloadLink').setAttribute('aria-disabled', 'false');
   $('downloadLink').href = appUrl(`api/records/${encodeURIComponent(state.record.id)}/download`);
   renderFacility();
-  renderObservationSeries();
+  renderObservations();
   renderConfigurationsOverview();
   renderProceduresSchedules();
   renderInstruments();
@@ -589,7 +591,7 @@ function renderValidation() {
   const warnings = state.validation.warnings || [];
   const valid = state.validation.valid;
   panel.className = `validation ${valid ? (warnings.length ? 'warning' : 'valid') : 'invalid'}`;
-  setStatus(valid ? (warnings.length ? 'Valid with warnings' : 'Valid WMDR2 v0.3.x') : 'Invalid WMDR2 v0.3.x', valid ? (warnings.length ? 'warning' : 'valid') : 'invalid');
+  setStatus(valid ? (warnings.length ? 'Valid with warnings' : 'Valid WMDR2 v0.4.0') : 'Invalid WMDR2 v0.4.0', valid ? (warnings.length ? 'warning' : 'valid') : 'invalid');
   const parts = [];
   parts.push(`<strong>${valid ? 'Structurally valid.' : `${errors.length} error(s).`}</strong>`);
   if (errors.length) {
@@ -652,18 +654,19 @@ function validationTargetForPath(path) {
   if (path === '$.id') return sectionFieldTarget('facilitySection', '#facilityForm [name="id"]');
   if (path === '$.properties.title') return sectionFieldTarget('facilitySection', '#facilityForm [name="title"]');
   if (path === '$.properties.wmoRegion') return sectionFieldTarget('facilitySection', '#facilityForm [name="wmoRegion"]');
+  if (path === '$.properties.facilityType') return sectionFieldTarget('facilitySection', '#facilityForm [name="facilityType"]');
   if (path === '$.time.interval[0]') return sectionFieldTarget('facilitySection', '#facilityForm [name="begin"]');
   if (path === '$.time.interval[1]') return sectionFieldTarget('facilitySection', '#facilityForm [name="end"]');
   if (path.startsWith('$.temporalGeometry') || path.startsWith('$.geometry')) {
     return sectionFieldTarget('facilitySection', '#temporalGeometryEditor input, #facilityForm [name="id"]');
   }
 
-  let match = path.match(/^\$\.properties\.observationSeries\[(\d+)\](?:\.(.*))?$/);
+  let match = path.match(/^\$\.properties\.observations\[(\d+)\](?:\.(.*))?$/);
   if (match) {
     const seriesIndex = Number(match[1]);
     const rest = match[2] || '';
-    if (rest.startsWith('observingConfigurations[')) {
-      const configMatch = rest.match(/^observingConfigurations\[(\d+)\](?:\.(.*))?$/);
+    if (rest.startsWith('configurations[')) {
+      const configMatch = rest.match(/^configurations\[(\d+)\](?:\.(.*))?$/);
       const configIndex = configMatch ? Number(configMatch[1]) : 0;
       const configPath = configMatch?.[2] || '';
       return configurationValidationTarget(seriesIndex, configIndex, configPath);
@@ -679,7 +682,7 @@ function validationTargetForPath(path) {
   }
 
 
-  match = path.match(/^\$\.properties\.territory\[(\d+)\](?:\.(.*))?$/);
+  match = path.match(/^\$\.properties\.territories\[(\d+)\](?:\.(.*))?$/);
   if (match) return facilityCollectionValidationTarget('territory', Number(match[1]), validationFieldFromPath(match[2] || ''));
 
   match = path.match(/^\$\.properties\.environment\[(\d+)\](?:\.(.*))?$/);
@@ -703,8 +706,8 @@ function sectionFieldTarget(sectionId, fieldSelector) {
 }
 
 function observationValidationTarget(index, path) {
-  const itemId = itemDomId('observationSeries', index);
-  return itemValidationTarget('observationSeries', index, validationFieldFromPath(path), itemId);
+  const itemId = itemDomId('observations', index);
+  return itemValidationTarget('observations', index, validationFieldFromPath(path), itemId);
 }
 
 function configurationValidationTarget(seriesIndex, configIndex, path) {
@@ -749,7 +752,7 @@ function validationFieldFromPath(path) {
   const normalized = path.replace(/\[(\d+)\]/g, '');
   if (normalized === 'time' || normalized === 'time.interval') return 'time.interval.0';
   if (normalized === 'observedFeature') return 'observedFeature.domain';
-  if (normalized === 'verticalDistanceFromReferenceSurface') return 'verticalDistanceFromReferenceSurface.value';
+  if (normalized === 'verticalDistance' || normalized === 'verticalDistance.distances') return 'verticalDistance.distances.0';
   if (normalized === 'surfaceCover') return 'surfaceCover.value';
   return normalized;
 }
@@ -790,8 +793,7 @@ function syncFacilityForm() {
   p.description = form.elements.description.value;
   if (form.elements.wmoRegion.value.trim()) p.wmoRegion = form.elements.wmoRegion.value.trim();
   else delete p.wmoRegion;
-  if (form.elements.facilityType.value.trim()) p.facilityType = form.elements.facilityType.value.trim();
-  else delete p.facilityType;
+  p.facilityType = form.elements.facilityType.value.trim() || null;
   setOptionalStringArray(p, 'additionalTitles', form.elements.additionalTitles.value);
   setOptionalStringArray(p, 'additionalIds', form.elements.additionalIds.value);
   setOptionalStringArray(p, 'keywords', form.elements.keywords.value);
@@ -841,7 +843,7 @@ function hasPopulationValue(values) {
 }
 
 function renderTerritoryHistory() {
-  const rows = asArray(props().territory);
+  const rows = asArray(props().territories);
   const count = $('territoryCount');
   const list = $('territoryList');
   if (!count || !list) return;
@@ -857,8 +859,8 @@ function renderTerritoryHistory() {
 
 function territoryRowHtml(row, index) {
   return `<tr data-facility-collection="territory" data-index="${index}" id="territory-${index}">
-    <td>${dateControlHtml('time.interval.0', timeBegin(row), `territory ${index + 1} begin`)}</td>
-    <td>${dateControlHtml('time.interval.1', timeEnd(row), `territory ${index + 1} end`)}</td>
+    <td>${dateControlHtml('dates.0', asArray(row.dates)[0], `territory ${index + 1} begin`)}</td>
+    <td>${dateControlHtml('dates.1', asArray(row.dates)[1], `territory ${index + 1} end`)}</td>
     <td>${codeInputHtml('territory', row.territory, 'territory', '— Select territory —')}</td>
     <td><button class="small-button danger" data-delete-facility-row="territory:${index}" type="button">Delete</button></td>
   </tr>`;
@@ -869,8 +871,8 @@ function syncTerritoryForms() {
   if (!list) return;
   const rows = [...list.querySelectorAll('[data-facility-collection="territory"]')];
   const values = rows.map(row => rowObjectFromFields(row, { coerce: true })).filter(item => item.territory || !isOpenInterval(item));
-  if (values.length) props().territory = values;
-  else delete props().territory;
+  if (values.length) props().territories = values;
+  else delete props().territories;
 }
 
 
@@ -881,8 +883,8 @@ function environmentPopulationHeaderPerimeters(rows) {
 
 function surfaceCoverParts(surfaceCover) {
   if (surfaceCover && typeof surfaceCover === 'object' && !Array.isArray(surfaceCover)) {
-    const scheme = inputValue(surfaceCover.classificationScheme || surfaceCover.classification || surfaceCover.scheme || '');
-    const uri = inputValue(surfaceCover.classificationURI || surfaceCover.schemeURI || surfaceCover.schemeUri || '');
+    const scheme = inputValue(surfaceCover.scheme || surfaceCover.classificationScheme || surfaceCover.classification || '');
+    const uri = inputValue(surfaceCover.scheme?.url || surfaceCover.classificationURI || surfaceCover.schemeURI || surfaceCover.schemeUri || '');
     const value = inputValue(surfaceCover.value ?? surfaceCover.code ?? surfaceCover.notation ?? '');
     return { scheme, uri, value };
   }
@@ -967,13 +969,14 @@ function surfaceCoverObjectFromRow(row) {
   if (!scheme && !value) return null;
   const result = {};
   if (scheme) {
-    result.classificationScheme = scheme;
-    result.classificationURI = surfaceCoverClassificationUri(scheme);
+    result.scheme = { id: scheme };
+    const schemeUri = surfaceCoverClassificationUri(scheme);
+    if (schemeUri) result.scheme.url = schemeUri;
   }
   if (value) {
-    result.value = valueOrNumber(value);
+    result.value = { id: value };
     const valueUri = surfaceCoverValueUri(scheme, value);
-    if (valueUri) result.valueURI = valueUri;
+    if (valueUri) result.value.url = valueUri;
   }
   return result;
 }
@@ -1147,8 +1150,8 @@ function isOpenInterval(item) {
 function addFacilityCollectionRow(kind) {
   syncFacilityForm();
   if (kind === 'territory') {
-    const rows = props().territory ??= [];
-    rows.push({ territory: '', time: { interval: [state.record.time?.interval?.[0] || '..', '..'] } });
+    const rows = props().territories ??= [];
+    rows.push({ territory: '', dates: [state.record.time?.interval?.[0] || '..', '..'] });
     state.pendingScrollTarget = `territory-${rows.length - 1}`;
   } else if (kind === 'environment') {
     const rows = props().environment ??= [];
@@ -1164,7 +1167,7 @@ function addFacilityCollectionRow(kind) {
 
 function deleteFacilityCollectionRow(kind, index) {
   syncFacilityForm();
-  if (kind === 'territory') props().territory?.splice(index, 1);
+  if (kind === 'territory') props().territories?.splice(index, 1);
   if (kind === 'environment') props().environment?.splice(index, 1);
   if (kind === 'facilityLink') props().links?.splice(index, 1);
   renderAll();
@@ -1355,26 +1358,31 @@ function deleteTemporalGeometryRow(index) {
   renderAll();
 }
 
-function renderObservationSeries() {
-  const series = asArray(props().observationSeries);
+function renderObservations() {
+  const series = asArray(props().observations);
   $('observationCount').textContent = series.length;
   $('observationsList').innerHTML = series.map((obs, index) => itemHtml(
-    observationSeriesHeaderTitle(obs, index),
-    observationSeriesFormHtml(obs, index),
-    'observationSeries',
+    observationsHeaderTitle(obs, index),
+    observationsFormHtml(obs, index),
+    'observations',
     index,
-  )).join('') || '<p class="muted">No ObservationSeries yet.</p>';
+  )).join('') || '<p class="muted">No Observations yet.</p>';
 }
 
-function observationSeriesHeaderTitle(obs, index) {
-  const id = entityId(obs) || `observationSeries:${index + 1}`;
+function observationsHeaderTitle(obs, index) {
+  const id = entityId(obs) || `observations:${index + 1}`;
   const title = String(obs.title || '').trim();
   return title ? `${id} [${title}]` : id;
 }
 
-function observationSeriesFormHtml(obs, index) {
+
+function programAffiliationValues(values) {
+  return asArray(values).map(item => inputValue(item?.programAffiliation ?? item)).filter(Boolean);
+}
+
+function observationsFormHtml(obs, index) {
   return `
-    <div class="item-form observation-form" data-kind="observationSeries" data-index="${index}">
+    <div class="item-form observation-form" data-kind="observations" data-index="${index}">
       <div class="observation-row two">
         <label>Observed property ${codeInputHtml('observedProperty', obs.observedProperty, 'observedVariableAtmosphere')}</label>
         <label>Observed geometry ${codeInputHtml('observedGeometry', obs.observedGeometry, 'observedGeometry')}</label>
@@ -1385,7 +1393,7 @@ function observationSeriesFormHtml(obs, index) {
         <label>Feature name <input data-field="observedFeature.featureName" value="${escapeAttr(obs.observedFeature?.featureName ?? '')}" /></label>
       </div>
       <div class="observation-row two">
-        <label>Program affiliations ${multiCodeInputHtml('programAffiliations', obs.programAffiliations, 'programAffiliations', 'program affiliation')}</label>
+        <label>Program affiliations ${multiCodeInputHtml('programAffiliations', programAffiliationValues(obs.programAffiliations), 'programAffiliations', 'program affiliation')}</label>
         <label>Application areas ${multiCodeInputHtml('applicationAreas', obs.applicationAreas, 'applicationAreas', 'application area')}</label>
       </div>
     </div>
@@ -1394,17 +1402,17 @@ function observationSeriesFormHtml(obs, index) {
     ${observationProcedureLinksHtml(obs, index)}
     ${observationContactLinksHtml(obs)}
     <div class="actions section-actions">
-      <button type="button" data-add-config="${index}">Add observing configuration</button>
+      <button type="button" data-add-config="${index}">Add configuration</button>
       <button type="button" data-add-observation-instrument="${index}">Add linked instrument</button>
     </div>`;
 }
 
 function observationConfigurations(obs) {
-  return asArray(obs.observingConfigurations);
+  return asArray(obs.configurations);
 }
 
 function flattenConfigurations() {
-  return asArray(props().observationSeries).flatMap((obs, seriesIndex) =>
+  return asArray(props().observations).flatMap((obs, seriesIndex) =>
     observationConfigurations(obs).map((config, configIndex) => ({ obs, config, seriesIndex, configIndex }))
   );
 }
@@ -1422,13 +1430,13 @@ function observationConfigurationLinksHtml(obs, index) {
     const label = configLabel(config, configIndex);
     return `<a class="xref" href="#${configurationDomId(index, configIndex)}" data-scroll-target="${configurationDomId(index, configIndex)}">${escapeHtml(label)}</a>`;
   });
-  return xrefRow('Observing configurations', links, 'No observingConfigurations');
+  return xrefRow('Configurations', links, 'No configurations');
 }
 
 function observationInstrumentLinksHtml(obs) {
   const instrumentIndex = indexByUid('instrument');
   const links = observationInstrumentRefs(obs).map(ref => linkToItem('instrument', instrumentIndex.get(ref), ref));
-  return xrefRow('Linked instruments', links, 'No instrument refs in observingConfigurations');
+  return xrefRow('Linked instruments', links, 'No instrument refs in configurations');
 }
 
 function procedureCollectionDomId(kind, seriesIndex) {
@@ -1448,7 +1456,7 @@ function observationProcedureLinksHtml(obs, seriesIndex) {
 function renderConfigurationsOverview() {
   const configs = flattenConfigurations();
   $('configurationCount').textContent = configs.length;
-  $('configurationsList').innerHTML = configs.map(({ obs, config, seriesIndex, configIndex }) => configurationItemHtml(obs, config, seriesIndex, configIndex)).join('') || '<p class="muted">No observing configurations yet.</p>';
+  $('configurationsList').innerHTML = configs.map(({ obs, config, seriesIndex, configIndex }) => configurationItemHtml(obs, config, seriesIndex, configIndex)).join('') || '<p class="muted">No configurations yet.</p>';
 }
 
 function configurationItemHtml(obs, config, seriesIndex, configIndex) {
@@ -1476,26 +1484,27 @@ function configLabel(config, index) {
 function configurationFormHtml(config, seriesIndex, configIndex) {
   return `
     <div class="item-form" data-kind="observingConfiguration" data-series-index="${seriesIndex}" data-config-index="${configIndex}">
+      <label>Configuration ID <input data-field="id" value="${escapeAttr(config.id || '')}" /></label>
       <label>Begin ${dateControlHtml('time.interval.0', configStart(config), 'configuration begin date')}</label>
       <label>End ${dateControlHtml('time.interval.1', configEnd(config), 'configuration end date')}</label>
       <label>Observing method ${codeInputHtml('observingMethod', config.observingMethod, 'observingMethodAtmosphere')}</label>
       <label>Operating status ${codeInputHtml('operatingStatus', config.operatingStatus, 'operatingStatus')}</label>
       <label>Source of observation ${codeInputHtml('sourceOfObservation', config.sourceOfObservation, 'sourceOfObservation')}</label>
       <label>Instrument ID <input data-field="instrument" value="${escapeAttr(config.instrument || '')}" /></label>
-      <label>Serial number <input data-field="serialNumber" value="${escapeAttr(config.serialNumber || '')}" /></label>
+      <label>Serial number <input data-field="instrumentSerialNumber" value="${escapeAttr(config.instrumentSerialNumber || '')}" /></label>
       <label>Exposure ${codeInputHtml('exposure', config.exposure, 'exposure')}</label>
-      <label>Reference surface ${codeInputHtml('referenceSurface', config.referenceSurface, 'referenceSurface')}</label>
+      <label>Reference surface ${codeInputHtml('verticalDistance.referenceSurface', config.verticalDistance?.referenceSurface, 'referenceSurface')}</label>
       <label>Relative location <input data-field="relativeLocation" value="${escapeAttr(config.relativeLocation ?? '')}" /></label>
-      <label>Vertical distance value <input data-field="verticalDistanceFromReferenceSurface.value" value="${escapeAttr(config.verticalDistanceFromReferenceSurface?.value ?? '')}" /></label>
-      <label>Vertical distance uom ${codeInputHtml('verticalDistanceFromReferenceSurface.uom', config.verticalDistanceFromReferenceSurface?.uom, 'unit')}</label>
+      <label>Vertical distance <input data-field="verticalDistance.distances.0" value="${escapeAttr(asArray(config.verticalDistance?.distances)[0] ?? '')}" /></label>
+      <label>Vertical distance unit ${codeInputHtml('verticalDistance.unit', config.verticalDistance?.unit, 'unit')}</label>
     </div>`;
 }
 
 function configurationCrossLinksHtml(obs, config, seriesIndex) {
   const instrumentIndex = indexByUid('instrument');
-  const obsLink = linkToItem('observationSeries', seriesIndex, entityId(obs) || obs.title || `ObservationSeries ${seriesIndex + 1}`);
+  const obsLink = linkToItem('observations', seriesIndex, entityId(obs) || obs.title || `Observations ${seriesIndex + 1}`);
   const instrumentLinks = config.instrument ? [linkToItem('instrument', instrumentIndex.get(config.instrument), config.instrument)] : [];
-  return `${xrefRow('Belongs to', [obsLink], 'No ObservationSeries')}${xrefRow('Linked instrument', instrumentLinks, 'No instrument ref')}`;
+  return `${xrefRow('Belongs to', [obsLink], 'No Observations')}${xrefRow('Linked instrument', instrumentLinks, 'No instrument ref')}`;
 }
 
 
@@ -1508,7 +1517,7 @@ function reportingProcedures(obs) {
 }
 
 function renderProceduresSchedules() {
-  const series = asArray(props().observationSeries);
+  const series = asArray(props().observations);
   const scheduleCount = asArray(props().schedules).length;
   const procedureTotal = series.reduce((count, obs) => count + observingProcedures(obs).length + reportingProcedures(obs).length, 0);
   const badge = $('procedureCount');
@@ -1517,22 +1526,22 @@ function renderProceduresSchedules() {
   if (list) {
     list.innerHTML = series.length
       ? series.map((obs, index) => proceduresForObservationHtml(obs, index)).join('')
-      : '<p class="muted">No ObservationSeries yet. Add an ObservationSeries before adding observing or reporting procedures.</p>';
+      : '<p class="muted">No Observations yet. Add an Observations before adding observing or reporting procedures.</p>';
   }
   renderSchedules();
 }
 
 function proceduresForObservationHtml(obs, seriesIndex) {
-  const id = entityId(obs) || `ObservationSeries ${seriesIndex + 1}`;
-  const label = observationSeriesHeaderTitle(obs, seriesIndex);
+  const id = entityId(obs) || `Observations ${seriesIndex + 1}`;
+  const label = observationsHeaderTitle(obs, seriesIndex);
   return `<article class="item procedure-card" id="procedures-${seriesIndex}" data-item-kind="procedures" data-series-index="${seriesIndex}">
     <div class="item-header">
       <div>
         <div class="item-title">Procedures and schedules for ${escapeHtml(label)}</div>
-        <div class="item-subtitle">ObservationSeries: ${escapeHtml(id)}</div>
+        <div class="item-subtitle">Observations: ${escapeHtml(id)}</div>
       </div>
       <div class="actions">
-        ${linkToItem('observationSeries', seriesIndex, 'Back to ObservationSeries')}
+        ${linkToItem('observations', seriesIndex, 'Back to Observations')}
       </div>
     </div>
     <section class="procedure-block" id="${procedureCollectionDomId('observing', seriesIndex)}">
@@ -1611,8 +1620,8 @@ function scheduleUsageLinksHtml(uid) {
   const value = inputValue(uid);
   if (!value) return '<span class="xref-empty">No UID yet</span>';
   const links = [];
-  asArray(props().observationSeries).forEach((obs, seriesIndex) => {
-    const obsLabel = entityId(obs) || `ObservationSeries ${seriesIndex + 1}`;
+  asArray(props().observations).forEach((obs, seriesIndex) => {
+    const obsLabel = entityId(obs) || `Observations ${seriesIndex + 1}`;
     observingProcedures(obs).forEach((procedure, procIndex) => {
       if (asArray(procedure.observingSchedules).map(inputValue).includes(value)) {
         const target = `observing-procedure-${seriesIndex}-${procIndex}`;
@@ -1648,14 +1657,14 @@ function syncProceduresAndSchedulesForms() {
   document.querySelectorAll('[data-procedure-kind="observingProcedure"]').forEach(row => {
     const seriesIndex = Number(row.dataset.seriesIndex);
     const procIndex = Number(row.dataset.procedureIndex);
-    const target = props().observationSeries?.[seriesIndex]?.observingProcedures?.[procIndex];
+    const target = props().observations?.[seriesIndex]?.observingProcedures?.[procIndex];
     if (!target) return;
     syncFieldsIntoTarget(row, target);
   });
   document.querySelectorAll('[data-procedure-kind="reportingProcedure"]').forEach(row => {
     const seriesIndex = Number(row.dataset.seriesIndex);
     const procIndex = Number(row.dataset.procedureIndex);
-    const obs = props().observationSeries?.[seriesIndex];
+    const obs = props().observations?.[seriesIndex];
     const target = obs?.reportingProcedures?.[procIndex];
     if (!target) return;
     syncFieldsIntoTarget(row, target);
@@ -1678,7 +1687,7 @@ function syncFieldsIntoTarget(container, target) {
 function addProcedure(kind, seriesIndex) {
   syncFacilityForm();
   syncItemForms();
-  const obs = props().observationSeries?.[seriesIndex];
+  const obs = props().observations?.[seriesIndex];
   if (!obs) return;
   if (kind === 'observing') {
     const rows = obs.observingProcedures ??= [];
@@ -1695,7 +1704,7 @@ function addProcedure(kind, seriesIndex) {
 function deleteProcedure(kind, seriesIndex, procIndex) {
   syncFacilityForm();
   syncItemForms();
-  const obs = props().observationSeries?.[seriesIndex];
+  const obs = props().observations?.[seriesIndex];
   if (!obs) return;
   if (kind === 'observing') obs.observingProcedures?.splice(procIndex, 1);
   if (kind === 'reporting') obs.reportingProcedures?.splice(procIndex, 1);
@@ -1731,8 +1740,8 @@ function deleteSchedule(index) {
 
 function proceduresSectionJson() {
   return {
-    observationSeries: asArray(props().observationSeries).map((obs, index) => ({
-      observationSeries: entityId(obs) || index,
+    observations: asArray(props().observations).map((obs, index) => ({
+      observations: entityId(obs) || index,
       observingProcedures: asArray(obs.observingProcedures),
       reportingProcedures: asArray(obs.reportingProcedures ?? obs.reporting),
     })),
@@ -1747,13 +1756,13 @@ function applyProceduresSectionJson(value) {
   }
   if (value && typeof value === 'object') {
     if (Array.isArray(value.schedules)) props().schedules = value.schedules;
-    asArray(value.observationSeries).forEach((entry, index) => applyProcedureEntry(entry, index));
+    asArray(value.observations).forEach((entry, index) => applyProcedureEntry(entry, index));
   }
 }
 
 function applyProcedureEntry(entry, fallbackIndex) {
-  const series = asArray(props().observationSeries);
-  const key = entry?.observationSeries;
+  const series = asArray(props().observations);
+  const key = entry?.observations;
   const index = key ? series.findIndex(obs => entityId(obs) === key) : fallbackIndex;
   if (index < 0 || !series[index]) return;
   if (Array.isArray(entry.observingProcedures)) series[index].observingProcedures = entry.observingProcedures;
@@ -1901,8 +1910,8 @@ function instrumentCrossLinksHtml(inst) {
   const seenSeries = new Set();
   const seriesLinks = configs
     .filter(({ seriesIndex }) => !seenSeries.has(seriesIndex) && seenSeries.add(seriesIndex))
-    .map(({ obs, seriesIndex }) => linkToItem('observationSeries', seriesIndex, entityId(obs) || obs.title || `ObservationSeries ${seriesIndex + 1}`));
-  return `${xrefRow('Used by configurations', configLinks, 'No observing configuration uses this instrument')}${xrefRow('Used by ObservationSeries', seriesLinks, 'No ObservationSeries uses this instrument')}`;
+    .map(({ obs, seriesIndex }) => linkToItem('observations', seriesIndex, entityId(obs) || obs.title || `Observations ${seriesIndex + 1}`));
+  return `${xrefRow('Used by configurations', configLinks, 'No configuration uses this instrument')}${xrefRow('Used by Observations', seriesLinks, 'No Observations uses this instrument')}`;
 }
 
 function renderContacts() {
@@ -1937,13 +1946,13 @@ function contactCrossLinksHtml(contact) {
     links.push(`<a class="xref" href="#facilitySection" data-scroll-target="facilitySection">Facility</a>`);
   }
   if (roles.some(role => role && role !== 'owner')) {
-    links.push(`<a class="xref" href="#observationsSection" data-scroll-target="observationsSection">ObservationSeries</a>`);
+    links.push(`<a class="xref" href="#observationsSection" data-scroll-target="observationsSection">Observations</a>`);
   }
   return xrefRow('Linked from', links, 'No role-based section link');
 }
 
 function syncItemForms() {
-  document.querySelectorAll('[data-kind="observationSeries"], [data-kind="instrument"], [data-kind="contact"]').forEach(form => {
+  document.querySelectorAll('[data-kind="observations"], [data-kind="instrument"], [data-kind="contact"]').forEach(form => {
     const kind = form.dataset.kind;
     const index = Number(form.dataset.index);
     const target = getSectionForKind(kind)[index];
@@ -1956,30 +1965,32 @@ function syncItemForms() {
   document.querySelectorAll('[data-kind="observingConfiguration"]').forEach(form => {
     const seriesIndex = Number(form.dataset.seriesIndex);
     const configIndex = Number(form.dataset.configIndex);
-    const target = props().observationSeries?.[seriesIndex]?.observingConfigurations?.[configIndex];
+    const target = props().observations?.[seriesIndex]?.configurations?.[configIndex];
     if (!target) return;
     form.querySelectorAll('[data-field]').forEach(input => {
       setField(target, input.dataset.field, coerceField(input.dataset.field, input.value));
     });
-    cleanupObservingConfiguration(target);
+    cleanupConfiguration(target);
   });
   syncProceduresAndSchedulesForms();
 }
 
-function cleanupObservingConfiguration(config) {
-  const quantity = config.verticalDistanceFromReferenceSurface;
-  if (quantity && typeof quantity === 'object' && !Array.isArray(quantity)) {
-    if (isEmptyFormValue(quantity.value)) {
-      delete config.verticalDistanceFromReferenceSurface;
-    } else if (isEmptyFormValue(quantity.uom)) {
-      delete quantity.uom;
+function cleanupConfiguration(config) {
+  const vd = config.verticalDistance;
+  if (vd && typeof vd === 'object' && !Array.isArray(vd)) {
+    vd.distances = asArray(vd.distances).filter(value => !isEmptyFormValue(value));
+    if (!vd.distances.length) {
+      delete config.verticalDistance;
+      return;
     }
+    if (isEmptyFormValue(vd.unit)) delete vd.unit;
+    if (isEmptyFormValue(vd.referenceSurface)) delete vd.referenceSurface;
   }
 }
 
 function getSectionForKind(kind) {
   const p = props();
-  if (kind === 'observationSeries') return p.observationSeries ??= [];
+  if (kind === 'observations') return p.observations ??= [];
   if (kind === 'instrument') return p.instruments ??= [];
   if (kind === 'contact') return p.contacts ??= [];
   throw new Error(`Unknown item type ${kind}`);
@@ -2034,9 +2045,9 @@ function pruneEmptyAncestors(ancestors) {
 
 function coerceField(field, value) {
   const trimmed = String(value ?? '').trim();
-  if (field === 'time.interval.0' || field === 'time.interval.1') return trimmed || '..';
+  if (field === 'time.interval.0' || field === 'time.interval.1' || field === 'dates.0' || field === 'dates.1') return trimmed || '..';
   if (['programAffiliations', 'applicationAreas', 'observingMethods', 'roles', 'observingSchedules', 'reportingSchedules', 'dataFormat', 'referenceTimeSource', 'additionalTitles', 'additionalIds', 'keywords', 'facilitySets'].includes(field)) {
-    return splitValues(trimmed).map(valueOrNumber);
+    return splitValues(trimmed);
   }
   if (['emails', 'phones'].includes(field)) {
     return splitValues(trimmed);
@@ -2046,9 +2057,10 @@ function coerceField(field, value) {
     if (trimmed === 'false') return false;
     return null;
   }
-  if (['observedProperty', 'observedGeometry', 'observingMethod', 'operatingStatus', 'sourceOfObservation', 'exposure', 'referenceSurface', 'facilityType', 'territory', 'climateZone', 'surfaceCover', 'surfaceRoughness', 'strategy', 'dataPolicy', 'levelOfData', 'uom', 'spatialReportingInterval', 'timeStampMeaning'].includes(field) || field.endsWith('.domain') || field.endsWith('.value')) {
-    return valueOrJsonOrNumber(trimmed);
+  if (['observedProperty', 'observedGeometry', 'observingMethod', 'operatingStatus', 'sourceOfObservation', 'exposure', 'facilityType', 'territory', 'climateZone', 'surfaceCover', 'surfaceRoughness', 'strategy', 'dataPolicy', 'levelOfData', 'uom', 'spatialReportingInterval', 'timeStampMeaning'].includes(field) || field.endsWith('.domain') || field.endsWith('.value') || field.endsWith('.unit') || field.endsWith('.referenceSurface')) {
+    return valueOrJson(trimmed);
   }
+  if (field === 'verticalDistance.distances.0') return valueOrNumber(trimmed);
   return trimmed;
 }
 
@@ -2056,12 +2068,12 @@ function splitValues(value) {
   return value ? value.split(',').map(part => part.trim()).filter(Boolean) : [];
 }
 
-function valueOrJsonOrNumber(value) {
+function valueOrJson(value) {
   if (value === '') return '';
   if (value.startsWith('{') || value.startsWith('[')) {
     try { return JSON.parse(value); } catch { return value; }
   }
-  return valueOrNumber(value);
+  return value;
 }
 
 function valueOrNumber(value) {
@@ -2078,13 +2090,17 @@ function numberOrNull(value) {
 
 function inputValue(value) {
   if (value === undefined || value === null) return '';
-  if (typeof value === 'object') return JSON.stringify(value);
+  if (typeof value === 'object') {
+    if (!Array.isArray(value) && value.id !== undefined) return String(value.id);
+    if (!Array.isArray(value) && value.value !== undefined && Object.keys(value).length <= 2) return String(value.value);
+    return JSON.stringify(value);
+  }
   return String(value);
 }
 
 function displayCompact(value) {
   if (value === undefined || value === null || value === '') return '';
-  if (typeof value === 'object') return value.nilReason ? `nil:${value.nilReason}` : JSON.stringify(value);
+  if (typeof value === 'object') return value.id !== undefined ? String(value.id) : JSON.stringify(value);
   return String(value);
 }
 
@@ -2152,7 +2168,7 @@ function createNewRecordTemplateFromDialog() {
     properties: {
       type: 'facility',
       title,
-      observationSeries: [],
+      observations: [],
       instruments: [],
       contacts: [],
       schedules: [],
@@ -2242,27 +2258,27 @@ async function saveAsFromDialog() {
 }
 
 function configurationsSectionJson() {
-  return asArray(props().observationSeries).map((obs, index) => ({
-    observationSeries: entityId(obs) || index,
-    observingConfigurations: asArray(obs.observingConfigurations),
+  return asArray(props().observations).map((obs, index) => ({
+    observations: entityId(obs) || index,
+    configurations: asArray(obs.configurations),
   }));
 }
 
 function applyConfigurationsSectionJson(value) {
-  const entries = ensureArray(value, 'observing configurations');
-  const series = asArray(props().observationSeries);
+  const entries = ensureArray(value, 'configurations');
+  const series = asArray(props().observations);
   entries.forEach((entry, index) => {
-    const targetIndex = findObservationSeriesIndexForConfigurationEntry(entry, index);
+    const targetIndex = findObservationsIndexForConfigurationEntry(entry, index);
     if (targetIndex >= 0 && series[targetIndex]) {
-      series[targetIndex].observingConfigurations = ensureArray(entry.observingConfigurations ?? [], 'observingConfigurations');
+      series[targetIndex].configurations = ensureArray(entry.configurations ?? [], 'configurations');
     }
   });
 }
 
-function findObservationSeriesIndexForConfigurationEntry(entry, fallbackIndex) {
-  const key = entry?.observationSeries;
+function findObservationsIndexForConfigurationEntry(entry, fallbackIndex) {
+  const key = entry?.observations;
   if (key) {
-    const found = asArray(props().observationSeries).findIndex(obs => entityId(obs) === key);
+    const found = asArray(props().observations).findIndex(obs => entityId(obs) === key);
     if (found >= 0) return found;
   }
   return Number.isInteger(fallbackIndex) ? fallbackIndex : -1;
@@ -2349,20 +2365,20 @@ function addOwnerContact() {
   renderAll();
 }
 
-function addInstrumentForObservationSeries(seriesIndex) {
+function addInstrumentForObservations(seriesIndex) {
   syncFacilityForm();
   syncItemForms();
-  const obs = props().observationSeries?.[seriesIndex];
+  const obs = props().observations?.[seriesIndex];
   if (!obs) return;
 
   const instruments = props().instruments ??= [];
   const uid = uniqueUid('instrument', new Set(instruments.map(entityId).filter(Boolean)));
-  const configs = obs.observingConfigurations ??= [];
+  const configs = obs.configurations ??= [];
   let configIndex = configs.findIndex(config => !config?.instrument);
   if (configIndex < 0) {
     configs.push({
       time: { interval: ['..', '..'] },
-      observingMethod: { nilReason: 'unknown' },
+      id: `${entityId(obs) || 'observation'}-configuration-${configs.length + 1}`,
     });
     configIndex = configs.length - 1;
   }
@@ -2370,8 +2386,8 @@ function addInstrumentForObservationSeries(seriesIndex) {
   config.instrument = uid;
 
   const observingMethods = [];
-  if (config.observingMethod !== undefined && config.observingMethod !== '' && typeof config.observingMethod !== 'object') {
-    observingMethods.push(config.observingMethod);
+  if (config.observingMethod !== undefined && config.observingMethod !== '') {
+    observingMethods.push(inputValue(config.observingMethod));
   }
   instruments.push({
     id: uid,
@@ -2390,12 +2406,14 @@ function addItem(kind) {
   syncItemForms();
   const section = getSectionForKind(kind);
   const next = section.length + 1;
-  if (kind === 'observationSeries') section.push({
-    id: `observationSeries:new-${next}`,
+  if (kind === 'observations') section.push({
+    id: `observation:new-${next}`,
     observedProperty: '',
+    observedGeometry: '',
     observedFeature: { domain: '' },
+    programAffiliations: [],
     applicationAreas: [],
-    observingConfigurations: [],
+    configurations: [],
   });
   if (kind === 'instrument') section.push({ id: uniqueUid('instrument', new Set(section.map(entityId).filter(Boolean))) });
   if (kind === 'contact') section.push({ identifier: uniqueUid('contact', new Set(section.map(entityId).filter(Boolean))), roles: [], emails: [] });
@@ -2405,14 +2423,14 @@ function addItem(kind) {
 function addConfiguration(seriesIndex) {
   syncFacilityForm();
   syncItemForms();
-  const obs = props().observationSeries?.[seriesIndex];
+  const obs = props().observations?.[seriesIndex];
   if (!obs) return;
-  obs.observingConfigurations ??= [];
-  obs.observingConfigurations.push({
+  obs.configurations ??= [];
+  obs.configurations.push({
+    id: `${entityId(obs) || 'observation'}-configuration-${obs.configurations.length + 1}`,
     time: { interval: ['..', '..'] },
-    observingMethod: { nilReason: 'unknown' },
   });
-  state.pendingScrollTarget = configurationDomId(seriesIndex, obs.observingConfigurations.length - 1);
+  state.pendingScrollTarget = configurationDomId(seriesIndex, obs.configurations.length - 1);
   renderAll();
 }
 
@@ -2426,7 +2444,7 @@ function deleteItem(kind, index) {
 function deleteConfiguration(seriesIndex, configIndex) {
   syncFacilityForm();
   syncItemForms();
-  props().observationSeries?.[seriesIndex]?.observingConfigurations?.splice(configIndex, 1);
+  props().observations?.[seriesIndex]?.configurations?.splice(configIndex, 1);
   renderAll();
 }
 
@@ -2475,7 +2493,7 @@ function scrollToItem(targetId) {
 
 function refreshRelationshipViews() {
   renderFacility();
-  renderObservationSeries();
+  renderObservations();
   renderConfigurationsOverview();
   renderProceduresSchedules();
   renderInstruments();
@@ -2486,30 +2504,84 @@ function refreshRelationshipViews() {
 function applyModal() {
   const value = parseJson($('modalJson').value, $('modalTitle').textContent);
   const target = state.modalTarget;
+  let scrollTarget = null;
+  let appliedLabel = 'JSON';
   if (target === 'facilityRaw') {
     Object.assign(state.record, pick(value, ['id', 'geometry', 'temporalGeometry', 'time', 'conformsTo']));
-    Object.assign(props(), omit(value.properties ? value.properties : value, ['observationSeries', 'instruments', 'contacts', 'schedules']));
-  } else if (target === 'observationSeriesRaw') props().observationSeries = ensureArray(value, 'observationSeries');
-  else if (target === 'configurationsRaw') applyConfigurationsSectionJson(value);
-  else if (target === 'proceduresRaw') applyProceduresSectionJson(value);
-  else if (target === 'instrumentsRaw') props().instruments = ensureArray(value, 'instruments');
-  else if (target === 'contactsRaw') props().contacts = ensureArray(value, 'contacts');
-  else if (target?.startsWith('item:')) {
+    Object.assign(props(), omit(value.properties ? value.properties : value, ['observations', 'instruments', 'contacts', 'schedules']));
+    scrollTarget = 'facilitySection';
+    appliedLabel = 'Facility JSON';
+  } else if (target === 'observationsRaw') {
+    props().observations = ensureArray(value, 'observations');
+    scrollTarget = 'observationsSection';
+    appliedLabel = 'Observations JSON';
+  } else if (target === 'configurationsRaw') {
+    applyConfigurationsSectionJson(value);
+    scrollTarget = 'configurationsSection';
+    appliedLabel = 'Configurations JSON';
+  } else if (target === 'proceduresRaw') {
+    applyProceduresSectionJson(value);
+    scrollTarget = 'proceduresSection';
+    appliedLabel = 'Procedures and schedules JSON';
+  } else if (target === 'instrumentsRaw') {
+    props().instruments = ensureArray(value, 'instruments');
+    scrollTarget = 'instrumentsSection';
+    appliedLabel = 'Instruments JSON';
+  } else if (target === 'contactsRaw') {
+    props().contacts = ensureArray(value, 'contacts');
+    scrollTarget = 'contactsSection';
+    appliedLabel = 'Contacts JSON';
+  } else if (target?.startsWith('item:')) {
     const [, kind, indexText] = target.split(':');
-    getSectionForKind(kind)[Number(indexText)] = value;
+    const index = Number(indexText);
+    const section = getSectionForKind(kind);
+    if (!Number.isInteger(index) || index < 0 || index >= section.length) {
+      throw new Error(`Cannot apply ${kind} JSON: item ${indexText} no longer exists.`);
+    }
+    section.splice(index, 1, value);
+    scrollTarget = itemDomId(kind, index);
+    appliedLabel = `${kind} JSON`;
   } else if (target?.startsWith('config:')) {
     const [, seriesText, configText] = target.split(':');
-    props().observationSeries[Number(seriesText)].observingConfigurations[Number(configText)] = value;
+    const seriesIndex = Number(seriesText);
+    const configIndex = Number(configText);
+    const configs = props().observations?.[seriesIndex]?.configurations;
+    if (!Array.isArray(configs) || !configs[configIndex]) {
+      throw new Error(`Cannot apply Configuration JSON: configuration ${seriesText}:${configText} no longer exists.`);
+    }
+    configs.splice(configIndex, 1, value);
+    scrollTarget = configurationDomId(seriesIndex, configIndex);
+    appliedLabel = 'Configuration JSON';
   } else if (target?.startsWith('procedure:')) {
     const [, kind, seriesText, procText] = target.split(':');
+    const seriesIndex = Number(seriesText);
+    const procIndex = Number(procText);
     const arrayName = kind === 'observing' ? 'observingProcedures' : 'reportingProcedures';
-    props().observationSeries[Number(seriesText)][arrayName][Number(procText)] = value;
+    const procedures = props().observations?.[seriesIndex]?.[arrayName];
+    if (!Array.isArray(procedures) || !procedures[procIndex]) {
+      throw new Error(`Cannot apply ${arrayName} JSON: procedure ${seriesText}:${procText} no longer exists.`);
+    }
+    procedures.splice(procIndex, 1, value);
+    scrollTarget = procedureDomId(kind, seriesIndex, procIndex);
+    appliedLabel = `${arrayName} JSON`;
   } else if (target?.startsWith('schedule:')) {
     const [, indexText] = target.split(':');
-    props().schedules[Number(indexText)] = value;
+    const index = Number(indexText);
+    const schedules = props().schedules ??= [];
+    if (!Number.isInteger(index) || index < 0 || index >= schedules.length) {
+      throw new Error(`Cannot apply Schedule JSON: schedule ${indexText} no longer exists.`);
+    }
+    schedules.splice(index, 1, value);
+    scrollTarget = `schedule-${index}`;
+    appliedLabel = 'Schedule JSON';
+  } else {
+    throw new Error('Cannot apply JSON: no editable target is active.');
   }
+  state.modalTarget = null;
+  if (scrollTarget) state.pendingScrollTarget = scrollTarget;
   $('jsonModal').close();
   renderAll();
+  setStatus(`${appliedLabel} applied. Save changes or validate to persist it to the server-side record.`, 'warning');
 }
 
 function ensureArray(value, label) {
@@ -2582,7 +2654,7 @@ $('applyRawBtn').addEventListener('click', () => {
     alert(error.message);
   }
 });
-$('addObservationBtn').addEventListener('click', () => addItem('observationSeries'));
+$('addObservationBtn').addEventListener('click', () => addItem('observations'));
 $('addInstrumentBtn').addEventListener('click', () => addItem('instrument'));
 $('addContactBtn').addEventListener('click', () => addItem('contact'));
 $('addTemporalGeometryBtn').addEventListener('click', () => addTemporalGeometryRow());
@@ -2605,7 +2677,7 @@ $('ownerContactNewBtn').addEventListener('click', () => addOwnerContact());
 
 // Keep old development data from throwing if an old HTML is cached.
 const oldAddDeployment = $('addDeploymentBtn');
-if (oldAddDeployment) oldAddDeployment.addEventListener('click', () => alert('WMDR2 v0.3.x no longer has facility-level deployments. Use observingConfigurations instead.'));
+if (oldAddDeployment) oldAddDeployment.addEventListener('click', () => alert('WMDR2 v0.4.0 no longer has facility-level deployments. Use configurations instead.'));
 
 document.addEventListener('toggle', event => {
   const section = event.target;
@@ -2712,7 +2784,7 @@ document.body.addEventListener('click', event => {
 
   const addObsInstrument = event.target.closest('[data-add-observation-instrument]');
   if (addObsInstrument) {
-    addInstrumentForObservationSeries(Number(addObsInstrument.dataset.addObservationInstrument));
+    addInstrumentForObservations(Number(addObsInstrument.dataset.addObservationInstrument));
     return;
   }
 
@@ -2743,9 +2815,9 @@ document.body.addEventListener('click', event => {
     syncItemForms();
     const target = open.dataset.openModal;
     const mapping = {
-      facilityRaw: ['Facility JSON', { id: state.record.id, geometry: state.record.geometry, temporalGeometry: state.record.temporalGeometry, time: state.record.time, conformsTo: state.record.conformsTo, properties: omit(props(), ['observationSeries', 'instruments', 'contacts', 'schedules']) }],
-      observationSeriesRaw: ['ObservationSeries JSON', props().observationSeries ?? []],
-      configurationsRaw: ['Observing configurations JSON', configurationsSectionJson()],
+      facilityRaw: ['Facility JSON', { id: state.record.id, geometry: state.record.geometry, temporalGeometry: state.record.temporalGeometry, time: state.record.time, conformsTo: state.record.conformsTo, properties: omit(props(), ['observations', 'instruments', 'contacts', 'schedules']) }],
+      observationsRaw: ['Observations JSON', props().observations ?? []],
+      configurationsRaw: ['Configurations JSON', configurationsSectionJson()],
       proceduresRaw: ['Procedures and schedules JSON', proceduresSectionJson()],
       instrumentsRaw: ['Instruments JSON', props().instruments ?? []],
       contactsRaw: ['Contacts JSON', props().contacts ?? []],
@@ -2777,7 +2849,7 @@ document.body.addEventListener('click', event => {
     syncFacilityForm();
     syncItemForms();
     const [seriesIndex, configIndex] = jsonConfigButton.dataset.jsonConfig.split(':').map(Number);
-    openModal(`config:${seriesIndex}:${configIndex}`, 'ObservingConfiguration JSON', props().observationSeries[seriesIndex].observingConfigurations[configIndex]);
+    openModal(`config:${seriesIndex}:${configIndex}`, 'Configuration JSON', props().observations[seriesIndex].configurations[configIndex]);
   }
 
   const jsonProcedureButton = event.target.closest('[data-json-procedure]');
@@ -2787,7 +2859,7 @@ document.body.addEventListener('click', event => {
     const [kind, seriesText, procText] = jsonProcedureButton.dataset.jsonProcedure.split(':');
     const seriesIndex = Number(seriesText);
     const procIndex = Number(procText);
-    const obs = props().observationSeries[seriesIndex];
+    const obs = props().observations[seriesIndex];
     const arrayName = kind === 'observing' ? 'observingProcedures' : 'reportingProcedures';
     openModal(`procedure:${kind}:${seriesIndex}:${procIndex}`, `${arrayName} JSON`, obs[arrayName][procIndex]);
   }
