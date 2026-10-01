@@ -469,6 +469,27 @@ function parseJson(text, label = 'JSON') {
   }
 }
 
+
+function valueOrNumber(value) {
+  const text = String(value ?? '').trim();
+  if (text === '') return '';
+  const asNumber = Number(text);
+  return Number.isFinite(asNumber) && String(asNumber) === text ? asNumber : value;
+}
+
+function valueOrJsonOrNumber(value) {
+  const text = String(value ?? '').trim();
+  if (text === '') return '';
+  if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+    try {
+      return JSON.parse(text);
+    } catch (_error) {
+      // Keep the user's original text while they are still editing invalid JSON.
+    }
+  }
+  return valueOrNumber(text);
+}
+
 async function api(path, options = {}) {
   const response = await fetch(appUrl(path), {
     headers: options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined,
