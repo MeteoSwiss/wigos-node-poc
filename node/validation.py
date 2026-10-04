@@ -134,6 +134,7 @@ def normalize_record(record: dict[str, Any]) -> dict[str, Any]:
         _normalize_observation(item, deployment_by_uid, index)
         for index, item in enumerate(_as_list(props.get("observations")))
     ]
+    _migrate_nested_contact_references(props)
 
     props.pop("deployments", None)
     props.pop("reporting", None)
@@ -477,6 +478,71 @@ def _normalize_surface_cover(value: Any) -> dict[str, Any] | None:
     return {"scheme": scheme, "value": _concept(cover_raw, base_url=cover_base)}
 
 
+def _migrate_nested_contact_references(props: dict[str, Any]) -> None:
+    """Keep Facility contacts full and normalize nested contacts to {ref, roles}."""
+    contacts = [_normalize_contact(item) for item in _as_list(props.get("contacts"))]
+    by_id: dict[str, dict[str, Any]] = {}
+    for contact in contacts:
+        identifier = contact.get("identifier")
+        if isinstance(identifier, str) and identifier:
+            by_id[identifier] = contact
+
+    def register_full(item: dict[str, Any]) -> str | None:
+        contact = _normalize_contact(item)
+        identifier = contact.get("identifier")
+        if not isinstance(identifier, str) or not identifier:
+            return None
+        roles = contact.pop("roles", None)
+        existing = by_id.get(identifier, {})
+        merged = dict(existing)
+        for key, value in contact.items():
+            if value not in (None, "", [], {}):
+                merged[key] = value
+        by_id[identifier] = merged
+        return identifier
+
+    def migrate(container: dict[str, Any]) -> None:
+        raw = container.get("contacts")
+        legacy = container.pop("contactReferences", None)
+        refs: list[dict[str, Any]] = []
+        for item in [*_as_list(legacy), *_as_list(raw)]:
+            if not isinstance(item, dict):
+                continue
+            ref = item.get("ref") or item.get("contact")
+            looks_embedded = any(key in item for key in ("identifier", "organization", "name", "emails", "phones", "addresses"))
+            if ref and not looks_embedded:
+                out = {"ref": str(ref)}
+                roles = item.get("roles")
+                if isinstance(roles, list) and roles:
+                    out["roles"] = [str(role) for role in roles if str(role).strip()]
+                refs.append(out)
+                continue
+            identifier = register_full(item)
+            if identifier:
+                out = {"ref": identifier}
+                roles = item.get("roles")
+                if isinstance(roles, list) and roles:
+                    out["roles"] = [str(role) for role in roles if str(role).strip()]
+                refs.append(out)
+        if refs:
+            container["contacts"] = refs
+        elif raw is not None or legacy is not None:
+            container.pop("contacts", None)
+
+    for obs in _as_list(props.get("observations")):
+        if not isinstance(obs, dict):
+            continue
+        migrate(obs)
+        for config in _as_list(obs.get("configurations")):
+            if isinstance(config, dict):
+                migrate(config)
+        for proc in _as_list(obs.get("reportingProcedures")):
+            if isinstance(proc, dict):
+                migrate(proc)
+
+    props["contacts"] = [by_id[key] for key in sorted(by_id)]
+
+
 def _normalize_contact(value: Any) -> dict[str, Any]:
     contact = dict(value) if isinstance(value, dict) else {}
     if "identifier" not in contact:
@@ -563,16 +629,34 @@ def _semantic_warnings(record: dict[str, Any]) -> list[ValidationMessage]:
 
     instrument_ids = {_ref_id(i) for i in instruments if isinstance(i, dict)}
     instrument_ids.discard(None)
+    contact_ids = {
+        str(item.get("identifier"))
+        for item in props.get("contacts", [])
+        if isinstance(item, dict) and item.get("identifier") not in (None, "")
+    }
+
+    def warn_contact_refs(container: dict[str, Any], path: str) -> None:
+        for index, ref in enumerate(container.get("contacts", []) or []):
+            if not isinstance(ref, dict):
+                continue
+            identifier = ref.get("ref")
+            if identifier and str(identifier) not in contact_ids:
+                warnings.append(ValidationMessage(path=f"{path}.contacts[{index}].ref", message=f"Contact reference {identifier!r} is not present in properties.contacts."))
 
     for s_index, obs in enumerate(observations):
         if not isinstance(obs, dict):
             continue
+        warn_contact_refs(obs, f"$.properties.observations[{s_index}]")
+        for p_index, proc in enumerate(obs.get("reportingProcedures", []) or []):
+            if isinstance(proc, dict):
+                warn_contact_refs(proc, f"$.properties.observations[{s_index}].reportingProcedures[{p_index}]")
         configs = obs.get("configurations", []) or []
         if not isinstance(configs, list):
             continue
         for c_index, config in enumerate(configs):
             if not isinstance(config, dict):
                 continue
+            warn_contact_refs(config, f"$.properties.observations[{s_index}].configurations[{c_index}]")
             interval = config.get("time", {}).get("interval") if isinstance(config.get("time"), dict) else None
             if isinstance(interval, list) and interval and interval[0] == "..":
                 warnings.append(ValidationMessage(path=f"$.properties.observations[{s_index}].configurations[{c_index}].time.interval[0]", message="The configuration start date is explicitly unknown/open ('..'); replace it with the recorded start date when available."))

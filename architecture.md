@@ -55,7 +55,7 @@ Persistent state is file-based. Records are stored as JSON files under the Node 
 
 ## Main workflow
 
-A user starts by creating a new facility, uploading a WMDR2 JSON file, pasting a record, or reopening a saved record. The browser sends the record to the backend, which normalizes it and stores it through `RecordStore`. The UI then renders the facility, ObservationSeries, observing configurations, instruments, contacts, procedures, schedules, and JSON editors from the in-memory record state.
+A user starts by creating a new facility, uploading a WMDR2 JSON file, pasting a record, or reopening a saved record. The browser sends the record to the backend, which normalizes it and stores it through `RecordStore`. The UI then renders the facility, ObservationSeries, observing configurations, instruments, reusable contacts, procedures, schedules, and JSON editors from the in-memory record state.
 
 Most edits happen in structured form controls. Single-value vocabulary fields use dropdowns. Multi-value fields use compact chip lists with a `+` selector. Cross-links connect related model entities, for example from an ObservationSeries to observing procedures, reporting procedures, instruments, contacts, and schedules. When a user follows a link, the page collapses unrelated top-level sections, opens the target section, scrolls to the relevant card or row, and highlights it.
 
@@ -63,7 +63,7 @@ When the user validates, the browser first synchronizes all visible controls bac
 
 ## WMDR2 coverage in v0.3.0
 
-The current form covers the core entities needed for early WMDR2 testing: Facility, geolocation and territory history, selected environment metadata, ObservationSeries, observing configurations, instruments, contacts, observing procedures, reporting procedures, and reusable schedules. Facility metadata includes geolocation, territory, description, additional metadata, surface cover with classification scheme, Davenport roughness, population/perimeter pairs, and topography/bathymetry fields backed by WMDR code lists where available.
+The current form covers the core entities needed for early WMDR2 testing: Facility, geolocation and territory history, selected environment metadata, ObservationSeries, observing configurations, instruments, reusable contacts, observing procedures, reporting procedures, and reusable schedules. Facility metadata includes geolocation, territory, description, additional metadata, surface cover with classification scheme, Davenport roughness, population/perimeter pairs, and topography/bathymetry fields backed by WMDR code lists where available.
 
 The procedures and schedules section is intentionally minimal. Observing and reporting procedure cards are linked from their parent ObservationSeries, and schedule reference chips can navigate to the corresponding reusable schedule row. The reverse direction is handled with “Used by” chips because a schedule may be reused by multiple procedures. Reusable schedule editing remains bare-bones and should be redesigned later with a more user-friendly schedule-specific widget.
 

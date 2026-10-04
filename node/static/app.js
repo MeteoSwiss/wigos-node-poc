@@ -401,7 +401,7 @@ const exampleRecord = {
         identifier: 'contact:metadata-office',
         organization: 'Example NMHS',
         name: 'Station metadata office',
-        roles: ['owner', 'pointOfContact'],
+        roles: ['supervisor', 'pointOfContact'],
         emails: ['metadata@example.invalid'],
       },
     ],
@@ -1958,18 +1958,22 @@ function renderFacilityContactLinks() {
 }
 
 function facilityContactLinksHtml() {
-  const ownerContacts = contactsWithRole('owner');
-  const ownerLinks = ownerContacts.map(({ contact, index }) => contactLink(contact, index));
-  const buttonLabel = ownerContacts.length === 1 ? 'Edit owner contact' : (ownerContacts.length > 1 ? 'Edit owner contacts' : 'Add owner contact');
-  return `${xrefRow('Owner contacts', ownerLinks, 'No contact has role owner')}<div class="actions section-actions inline-actions"><button type="button" data-open-owner-contact>${escapeHtml(buttonLabel)}</button></div>`;
+  const supervisorContacts = contactsWithRole('supervisor');
+  const supervisorLinks = supervisorContacts.map(({ contact, index }) => contactLink(contact, index));
+  const buttonLabel = supervisorContacts.length === 1 ? 'Edit supervisor contact' : (supervisorContacts.length > 1 ? 'Edit supervisor contacts' : 'Add supervisor contact');
+  return `${xrefRow('Supervisor contacts', supervisorLinks, 'No contact has role supervisor')}<div class="actions section-actions inline-actions"><button type="button" data-open-owner-contact>${escapeHtml(buttonLabel)}</button></div>`;
 }
 
-function observationContactLinksHtml(_obs) {
-  const links = contactsExceptRole('owner').map(({ contact, index }) => {
-    const roles = contactRoleText(contact, 'owner');
-    return contactLink(contact, index, roles || undefined);
+function observationContactLinksHtml(obs) {
+  const contactIndex = new Map(asArray(props().contacts).map((contact, index) => [entityId(contact), { contact, index }]));
+  const links = asArray(obs.contacts).map(reference => {
+    const ref = reference?.ref;
+    const resolved = contactIndex.get(ref);
+    if (!resolved) return `<span class="xref broken">${escapeHtml(ref || 'missing contact ref')} ⚠</span>`;
+    const roles = asArray(reference.roles).join(', ');
+    return contactLink(resolved.contact, resolved.index, roles || undefined);
   });
-  return xrefRow('Contacts by role', links, 'No non-owner contact roles available');
+  return xrefRow('Contacts by role', links, 'No contact references');
 }
 
 function configsUsingInstrument(instrumentUid) {
@@ -2015,15 +2019,16 @@ function contactFormHtml(contact, index) {
 }
 
 function contactCrossLinksHtml(contact) {
-  const roles = asArray(contact.roles).map(normalizeRole);
+  const identifier = entityId(contact);
   const links = [];
-  if (roles.includes('owner')) {
+  if (asArray(contact.roles).length) {
     links.push(`<a class="xref" href="#facilitySection" data-scroll-target="facilitySection">Facility</a>`);
   }
-  if (roles.some(role => role && role !== 'owner')) {
+  const usedByObservation = asArray(props().observations).some(obs => asArray(obs.contacts).some(ref => ref?.ref === identifier));
+  if (usedByObservation) {
     links.push(`<a class="xref" href="#observationsSection" data-scroll-target="observationsSection">Observations</a>`);
   }
-  return xrefRow('Linked from', links, 'No role-based section link');
+  return xrefRow('Linked from', links, 'No contact reference');
 }
 
 function syncItemForms() {
@@ -2373,13 +2378,13 @@ function openOwnerContactModal() {
   syncFacilityForm();
   syncItemForms();
   const contacts = props().contacts ??= [];
-  const owners = contactsWithRole('owner');
+  const owners = contactsWithRole('supervisor');
   const select = $('ownerContactSelect');
   if (!select) return;
-  $('ownerContactModalTitle').textContent = owners.length === 1 ? 'Edit owner contact' : (owners.length > 1 ? 'Edit owner contacts' : 'Add owner contact');
+  $('ownerContactModalTitle').textContent = owners.length === 1 ? 'Edit supervisor contact' : (owners.length > 1 ? 'Edit supervisor contacts' : 'Add supervisor contact');
   $('ownerContactModalHelp').textContent = owners.length
-    ? 'Review the current owner contact, assign another existing contact as owner, or create a new owner contact.'
-    : 'No owner contact is assigned. Choose an existing contact or create a new contact with role owner.';
+    ? 'Review the current owner contact, assign another existing contact as supervisor, or create a new owner contact.'
+    : 'No supervisor contact is assigned. Choose an existing contact or create a new contact with role supervisor.';
   select.innerHTML = contacts.map((contact, index) => {
     const selected = owners.length === 1 && owners[0].index === index ? ' selected' : '';
     const roles = asArray(contact.roles).join(', ');
@@ -2409,7 +2414,7 @@ function assignSelectedOwnerContact() {
   const index = selectedOwnerContactIndex();
   const contact = props().contacts?.[index];
   if (!contact) return;
-  ensureContactRole(contact, 'owner');
+  ensureContactRole(contact, 'supervisor');
   $('ownerContactModal').close();
   state.pendingScrollTarget = itemDomId('contact', index);
   renderAll();
@@ -2431,7 +2436,7 @@ function addOwnerContact() {
     identifier: uid,
     name: '',
     organization: '',
-    roles: ['owner'],
+    roles: ['supervisor'],
     emails: [],
     phones: [],
   });

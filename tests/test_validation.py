@@ -60,7 +60,7 @@ def minimal_record():
                 {"id": "instrument:test", "manufacturer": "Example", "model": "A", "observingMethods": [concept("266", "ObservingMethodAtmosphere")]}
             ],
             "contacts": [
-                {"identifier": "contact:owner", "organization": "Example", "emails": [{"value": "x@example.invalid"}], "roles": ["owner"]}
+                {"identifier": "contact:owner", "organization": "Example", "emails": [{"value": "x@example.invalid"}], "roles": ["supervisor"]}
             ],
             "schedules": [],
         },
@@ -308,3 +308,22 @@ def test_normalize_prefixes_bare_instrument_ids_and_references():
     assert config["instrument"] == "instrument:RS41"
     report = validate_record(normalized)
     assert report.valid, report.as_dict()
+
+
+def test_nested_contact_reference_is_valid() -> None:
+    record = minimal_record()
+    record["properties"]["observations"][0]["contacts"] = [
+        {"ref": "contact:owner", "roles": ["principalInvestigator"]}
+    ]
+    report = validate_record(record)
+    assert report.valid, report.as_dict()
+
+
+def test_missing_nested_contact_reference_is_warning() -> None:
+    record = minimal_record()
+    record["properties"]["observations"][0]["contacts"] = [
+        {"ref": "contact:missing", "roles": ["principalInvestigator"]}
+    ]
+    report = validate_record(record)
+    assert report.valid
+    assert any("contact:missing" in warning.message for warning in report.warnings)
